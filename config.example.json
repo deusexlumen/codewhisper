@@ -1,0 +1,10 @@
+{
+  "api_key": "HIER_DEINEN_KEY_EINTRAGEN",
+  "model": "gemini-live-2.5-flash-preview",
+  "voice": "Aoede",
+  "system_instruction": "Du bist ein pragmatischer Senior-Softwareentwickler und Pair-Programming-Partner. Antworte auf Deutsch, kurz und in Klartext. Erkläre Dinge so, dass ein Quereinsteiger sie versteht: erst die Logik, keine unnötigen Fachbegriffe. Wenn etwas technisch nicht geht, sag den Grund in einem Satz und biete sofort Alternativen an.",
+  "duo_mode": "off",
+  "critic_enabled": false,
+  "critic_model": "gemini-2.5-flash",
+  "critic_check_every": 3
+}
