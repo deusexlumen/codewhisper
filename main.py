@@ -140,8 +140,11 @@ async def main(page: ft.Page):
     async def run_critic_check() -> None:
         """Phase 4: fragt den Hintergrund-Prüfer, flüstert der Live-Sitzung einen
         Hinweis zu, falls er einen Widerspruch/Logikfehler findet. Netzwerkfehler
-        hier dürfen die laufende Sprach-Sitzung nie stören (siehe BackgroundCritic.check)."""
-        hint = await critic.check(transcript_log)
+        hier dürfen die laufende Sprach-Sitzung nie stören (siehe BackgroundCritic.check).
+        Nimmt zusätzlich den aktuellen Zwischenablage-Inhalt mit, damit der Prüfer
+        Behauptungen ("das ist jetzt gefixt") gegen echten Code abgleichen kann."""
+        code_snippet = code_context.read_clipboard()
+        hint = await critic.check(transcript_log, code_snippet=code_snippet)
         if hint:
             await session.send_text(background_critic.wrap_hint(hint))
 

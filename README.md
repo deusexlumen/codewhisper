@@ -10,7 +10,7 @@ Du sprichst — die KI antwortet per Stimme, in Echtzeit, mit zwei Denkrollen un
 [![Gemini Live API](https://img.shields.io/badge/Gemini-Live%20API-8E75FF?style=flat-square&logo=googlegemini&logoColor=white)](https://ai.google.dev/gemini-api/docs/live)
 [![Flet](https://img.shields.io/badge/UI-Flet-0175C2?style=flat-square)](https://flet.dev/)
 [![Status](https://img.shields.io/badge/Status-4%2F4%20Phasen%20fertig-2EA44F?style=flat-square)](#der-plan-in-4-phasen)
-[![Tests](https://img.shields.io/badge/Tests-47%20passing-2EA44F?style=flat-square)](#tests-ausführen)
+[![Tests](https://img.shields.io/badge/Tests-51%20passing-2EA44F?style=flat-square)](#tests-ausführen)
 [![Sprache](https://img.shields.io/badge/Sprache-Deutsch-black?style=flat-square)](#)
 
 </div>
@@ -23,7 +23,7 @@ Du sprichst — die KI antwortet per Stimme, in Echtzeit, mit zwei Denkrollen un
 |---|---|
 | 🗣️ **Live-Sprachgespräch** | Reden statt tippen — Gemini Live API antwortet per Stimme, fast ohne Wartezeit |
 | 🎭 **Duo-Mode** | Eine KI, zwei Denkrollen: **Visionär** (Chancen, groß denken) ↔ **Pragmatiker** (Realismus, Kosten, Risiken) |
-| 🕵️ **Closed-Loop-Kritiker** | Läuft still im Hintergrund mit, findet Logikfehler/Widersprüche und flüstert sie der KI unauffällig zu |
+| 🕵️ **Closed-Loop-Kritiker** | Läuft still im Hintergrund mit, prüft auch gegen echten Code aus der Zwischenablage und flüstert Logikfehler/Widersprüche der KI unauffällig zu |
 | 📋 **Code-Kontext-Grounding** | Ein Klick schickt den Inhalt der Zwischenablage unsichtbar mit — die KI redet über echten Code statt nur über deine Beschreibung davon |
 | 💾 **Sitzungen** | Gesprächsverlauf speichern & wieder öffnen, als JSON unter `sessions/` |
 | 🎨 **Frei einstellbar** | ~30 Gemini-Stimmen zur Auswahl, alles per Zahnrad-Symbol im Fenster |
@@ -103,7 +103,7 @@ Mic-Thread und Speaker-Thread laufen unabhängig vom Event-Loop (echte Audio-Thr
 | `duo_mode.py` | Phase 3: Regeln für die zwei Denkrollen |
 | `background_critic.py` | Phase 4: der stille Kritiker (Closed-Loop) |
 | `code_context.py` | Code-Kontext-Grounding: Zwischenablage → unsichtbare Kontext-Nachricht |
-| `tests/` | 47 Pytest-Tests für die Logik-Module |
+| `tests/` | 51 Pytest-Tests für die Logik-Module |
 
 ---
 
@@ -196,6 +196,7 @@ Eine App, mit der du per Sprache mit einer KI über deine Geschäftsideen oder d
 <br>
 
 - Ein zweiter, unsichtbarer Prozess (`background_critic.py`) liest in Abständen (`critic_check_every`) den Verlauf mit — über einen separaten, nicht-live Text-Aufruf, nicht über die Sprachverbindung.
+- Prüft bei jedem Check zusätzlich die aktuelle Zwischenablage mit — erkennt so auch Widersprüche zwischen Gesagtem und echtem Code (z.B. "das ist jetzt gefixt", aber der Code zeigt weiter den Bug).
 - Findet er einen Fehler oder Widerspruch, flüstert er der KI unauffällig etwas ins Ohr (`send_text()`) — sie bringt es natürlich ins Gespräch ein.
 - Nutzer merkt nichts davon, außer dass die KI plötzlich klügere Einwände macht.
 - Aus mit `critic_enabled: false` (Standard) — schaltbar in `config.json`.

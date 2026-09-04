@@ -28,6 +28,25 @@ def test_build_critic_prompt_handles_missing_keys():
     assert "?: " in prompt
 
 
+def test_build_critic_prompt_without_code_snippet_omits_code_section():
+    prompt = build_critic_prompt([{"who": "Du", "text": "Hallo"}])
+    assert "Code-Ausschnitt aus der Zwischenablage:" not in prompt
+
+
+def test_build_critic_prompt_includes_code_snippet():
+    prompt = build_critic_prompt(
+        [{"who": "Du", "text": "Ist das jetzt gefixt?"}],
+        code_snippet="def foo():\n    return 1 / 0",
+    )
+    assert "Code-Ausschnitt" in prompt
+    assert "def foo():\n    return 1 / 0" in prompt
+
+
+def test_build_critic_prompt_ignores_empty_code_snippet():
+    prompt = build_critic_prompt([{"who": "Du", "text": "Hallo"}], code_snippet="   ")
+    assert "Code-Ausschnitt aus der Zwischenablage:" not in prompt
+
+
 # ---------- parse_critic_response ----------
 
 @pytest.mark.parametrize(
@@ -137,3 +156,15 @@ async def test_check_swallows_network_errors():
     critic = BackgroundCritic(client=client, model="gemini-2.5-flash")
     result = await critic.check([{"who": "Du", "text": "Egal was."}])
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_check_threads_code_snippet_into_prompt():
+    client = _FakeClient("OK")
+    critic = BackgroundCritic(client=client, model="gemini-2.5-flash")
+    await critic.check(
+        [{"who": "Du", "text": "Hab den Bug gefixt."}],
+        code_snippet="def foo():\n    return 1 / 0",
+    )
+    sent_prompt = client.aio.models.calls[0][1]
+    assert "def foo():\n    return 1 / 0" in sent_prompt

@@ -14,24 +14,31 @@ abgesichert.
 from google import genai
 
 CRITIC_PROMPT_HEADER = (
-    "Du bist ein stiller Hintergrund-Prüfer für ein Brainstorming-Gespräch über "
-    "eine Geschäftsidee. Du liest NUR mit, du sprichst nicht direkt mit.\n\n"
+    "Du bist ein stiller Hintergrund-Prüfer für ein Brainstorming- oder Coding-Gespräch. "
+    "Du liest NUR mit, du sprichst nicht direkt mit.\n\n"
     "Prüfe den folgenden Gesprächsausschnitt auf klare Logikfehler, Widersprüche "
     "oder unrealistische Annahmen (z.B. widersprüchliche Zahlen, ein Zielmarkt, "
     "der sich selbst ausschließt, eine Kostenannahme, die offensichtlich nicht "
-    "aufgeht).\n\n"
+    "aufgeht). Falls unten ein Code-Ausschnitt angegeben ist, prüfe zusätzlich, ob "
+    "das im Gespräch Behauptete (z.B. \"das ist jetzt gefixt\") zu diesem Code "
+    "passt.\n\n"
     "Antworte NUR in einem der beiden Formate, ohne weiteren Text:\n"
     "OK\n"
     "HINWEIS: <ein kurzer, konkreter Satz, was zu prüfen wäre>\n\n"
-    "Gesprächsausschnitt:\n"
 )
 
 
-def build_critic_prompt(transcript_log: list[dict], window: int = 12) -> str:
-    """Baut den Prompt aus den letzten `window` Gesprächszeilen."""
+def build_critic_prompt(
+    transcript_log: list[dict], window: int = 12, code_snippet: str | None = None
+) -> str:
+    """Baut den Prompt aus den letzten `window` Gesprächszeilen, optional ergänzt
+    um einen Code-Ausschnitt (z.B. aus `code_context.read_clipboard()`)."""
     recent = transcript_log[-window:]
     lines = [f"{entry.get('who', '?')}: {entry.get('text', '')}" for entry in recent]
-    return CRITIC_PROMPT_HEADER + "\n".join(lines)
+    prompt = CRITIC_PROMPT_HEADER
+    if code_snippet and code_snippet.strip():
+        prompt += f"Code-Ausschnitt aus der Zwischenablage:\n{code_snippet.strip()}\n\n"
+    return prompt + "Gesprächsausschnitt:\n" + "\n".join(lines)
 
 
 def parse_critic_response(response_text: str) -> str | None:
@@ -72,9 +79,11 @@ class BackgroundCritic:
             return True
         return False
 
-    async def check(self, transcript_log: list[dict]) -> str | None:
+    async def check(
+        self, transcript_log: list[dict], code_snippet: str | None = None
+    ) -> str | None:
         """Ruft das Prüf-Modell auf. Gibt den Hinweis zurück, oder None (auch bei Fehlern)."""
-        prompt = build_critic_prompt(transcript_log)
+        prompt = build_critic_prompt(transcript_log, code_snippet=code_snippet)
         try:
             response = await self.client.aio.models.generate_content(
                 model=self.model,
