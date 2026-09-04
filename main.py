@@ -358,11 +358,19 @@ async def main(page: ft.Page):
             resume_sent = True
             asyncio.create_task(send_resume_context())
 
+    def handle_tool_call(command: str, result_text: str) -> None:
+        """Function-Calling: macht sichtbar, welches Allowlist-Kommando die
+        KI ausgeführt hat und was dabei rauskam (gleiches Sichtbarkeits-
+        Prinzip wie bei Kritiker-Hinweisen/Sitzungs-Zusammenfassungen)."""
+        preview = result_text if len(result_text) <= 200 else result_text[:200] + " …"
+        add_system_note(f"🔧 {command}: {preview}")
+
     session = GeminiLiveSession(
         config=config,
         audio=audio,
         on_status=handle_status,
         on_transcript=add_transcript_line,
+        on_tool_call=handle_tool_call,
     )
 
     def do_switch_role(_event) -> None:

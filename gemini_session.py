@@ -10,11 +10,13 @@ from typing import Awaitable, Callable
 from google import genai
 from google.genai import types
 
+import dev_tools
 from audio_engine import AudioEngine
 from config import AppConfig
 
 StatusCallback = Callable[[str], None]
 TranscriptCallback = Callable[[str, str], None]  # (wer, text)
+ToolCallCallback = Callable[[str, str], None]  # (Kommando, Ergebnis-Text)
 
 
 def _is_normal_close(exc: BaseException) -> bool:
@@ -33,11 +35,13 @@ class GeminiLiveSession:
         audio: AudioEngine,
         on_status: StatusCallback,
         on_transcript: TranscriptCallback | None = None,
+        on_tool_call: ToolCallCallback | None = None,
     ):
         self.config = config
         self.audio = audio
         self.on_status = on_status
         self.on_transcript = on_transcript
+        self.on_tool_call = on_tool_call
         self.session = None  # aktive Verbindung (für spätere Text-Einspeisung)
         self._stop = asyncio.Event()
 
@@ -61,6 +65,9 @@ class GeminiLiveSession:
             # Mitschrift beider Seiten, damit das Fenster Text zeigen kann
             input_audio_transcription=types.AudioTranscriptionConfig(),
             output_audio_transcription=types.AudioTranscriptionConfig(),
+            # Function-Calling: feste Allowlist (dev_tools.py), keine freien
+            # Kommandos -- das Modell wählt nur einen Namen aus einem Enum.
+            tools=[types.Tool(function_declarations=[dev_tools.build_tool_declaration()])],
         )
 
         self.on_status("Verbinde …")
@@ -103,13 +110,39 @@ class GeminiLiveSession:
                 raise
 
     async def _receive_loop(self, session) -> None:
-        """Empfängt Antworten: Audio abspielen, Text ins Fenster."""
+        """Empfängt Antworten: Audio abspielen, Text ins Fenster, Tool-Aufrufe ausführen."""
         try:
             async for message in session.receive():
+                if message.tool_call:
+                    await self._handle_tool_call(session, message.tool_call)
                 self._handle_message(message)
         except Exception as exc:
             if not _is_normal_close(exc):
                 raise
+
+    async def _handle_tool_call(self, session, tool_call) -> None:
+        """Function-Calling: führt angefragte Allowlist-Kommandos aus
+        (dev_tools.run_tool, das selbst nie eine Exception wirft -- der
+        try/except hier ist zusätzliche Absicherung, kein erwarteter Pfad)
+        und schickt das Ergebnis zurück. Ein fehlschlagender Tool-Aufruf darf
+        die Sprach-Sitzung nie zum Absturz bringen (gleiches Prinzip wie
+        BackgroundCritic.check())."""
+        responses = []
+        for call in tool_call.function_calls:
+            command = (call.args or {}).get("command", "")
+            try:
+                result_text = await dev_tools.run_tool(command)
+            except Exception as exc:
+                result_text = f"Kommando konnte nicht ausgeführt werden: {exc}"
+            responses.append(
+                types.FunctionResponse(
+                    id=call.id, name=call.name, response={"output": result_text}
+                )
+            )
+            if self.on_tool_call:
+                self.on_tool_call(command, result_text)
+        if responses:
+            await session.send_tool_response(function_responses=responses)
 
     def _handle_message(self, message) -> None:
         content = message.server_content

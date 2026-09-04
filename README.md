@@ -10,7 +10,7 @@ Du sprichst — die KI antwortet per Stimme, in Echtzeit, mit zwei Denkrollen un
 [![Gemini Live API](https://img.shields.io/badge/Gemini-Live%20API-8E75FF?style=flat-square&logo=googlegemini&logoColor=white)](https://ai.google.dev/gemini-api/docs/live)
 [![Flet](https://img.shields.io/badge/UI-Flet-0175C2?style=flat-square)](https://flet.dev/)
 [![Status](https://img.shields.io/badge/Status-4%2F4%20Phasen%20fertig-2EA44F?style=flat-square)](#der-plan-in-4-phasen)
-[![Tests](https://img.shields.io/badge/Tests-64%20passing-2EA44F?style=flat-square)](#tests-ausführen)
+[![Tests](https://img.shields.io/badge/Tests-75%20passing-2EA44F?style=flat-square)](#tests-ausführen)
 [![Sprache](https://img.shields.io/badge/Sprache-Deutsch-black?style=flat-square)](#)
 
 </div>
@@ -26,6 +26,7 @@ Du sprichst — die KI antwortet per Stimme, in Echtzeit, mit zwei Denkrollen un
 | 🕵️ **Closed-Loop-Kritiker** | Läuft still im Hintergrund mit, prüft gegen echten Code und offene Punkte aus der letzten Sitzung, und flüstert Logikfehler/Widersprüche der KI unauffällig zu |
 | 📋 **Code-Kontext-Grounding** | Ein Klick schickt den Inhalt der Zwischenablage unsichtbar mit — die KI redet über echten Code statt nur über deine Beschreibung davon |
 | 🧵 **Cross-Session-Gedächtnis** | Beim Verbinden wird die letzte Sitzung automatisch zusammengefasst und unsichtbar eingespeist — jedes Gespräch startet nicht mehr bei Null |
+| 🔧 **Function-Calling** | Die KI kann Tests laufen lassen und Git-Status/Diff/Log ansehen (feste Allowlist) statt nur darüber zu reden — "sind die Tests grün?" wird eine echte Antwort |
 | 💾 **Sitzungen** | Gesprächsverlauf speichern & wieder öffnen, als JSON unter `sessions/` |
 | 🎨 **Frei einstellbar** | ~30 Gemini-Stimmen zur Auswahl, alles per Zahnrad-Symbol im Fenster |
 
@@ -85,10 +86,14 @@ flowchart LR
     Sessions[("sessions/*.json")] --> Mem["session_memory.py"]
     Mem -- "send_text() (einmalig)" --> Live
 
+    Live -- "tool_call" --> Tools["dev_tools.py\n(Allowlist)"]
+    Tools -- "send_tool_response()" --> Live
+
     style Live fill:#8E75FF,color:#fff
     style Critic fill:#2EA44F,color:#fff
     style Ctx fill:#0175C2,color:#fff
     style Mem fill:#D97706,color:#fff
+    style Tools fill:#DC2626,color:#fff
 ```
 
 Mic-Thread und Speaker-Thread laufen unabhängig vom Event-Loop (echte Audio-Threads, per `asyncio.Queue`/Lock angebunden). Der Hintergrund-Kritiker und das Code-Kontext-Grounding sind reine Seitenkanäle: Beide reden nur über `GeminiLiveSession.send_text()` unsichtbar in die laufende Sitzung hinein — sie fassen den Audio-Pfad nie direkt an.
@@ -109,7 +114,8 @@ Mic-Thread und Speaker-Thread laufen unabhängig vom Event-Loop (echte Audio-Thr
 | `background_critic.py` | Phase 4: der stille Kritiker (Closed-Loop) |
 | `code_context.py` | Code-Kontext-Grounding: Zwischenablage → unsichtbare Kontext-Nachricht |
 | `session_memory.py` | Cross-Session-Gedächtnis: letzte Sitzung zusammenfassen → beim Connect einmalig einspeisen |
-| `tests/` | 64 Pytest-Tests für die Logik-Module |
+| `dev_tools.py` | Function-Calling: feste Kommando-Allowlist (`pytest`, `git status/diff/log`) ausführen |
+| `tests/` | 75 Pytest-Tests für die Logik-Module |
 
 ---
 
@@ -134,7 +140,7 @@ Mic-Thread und Speaker-Thread laufen unabhängig vom Event-Loop (echte Audio-Thr
 pytest
 ```
 
-Testet die Logik-Module (`config.py`, `sessions.py`, `duo_mode.py`, `background_critic.py`, `code_context.py`) ohne echtes Mikro/Lautsprecher/API — Gemini-Aufrufe werden durch Fakes ersetzt, die Zwischenablage durch eine injizierbare Funktion. `main.py` selbst (die Flet-Oberfläche) hat keine automatisierten Tests — per Hand prüfen (`python main.py` starten und ausprobieren).
+Testet die Logik-Module (`config.py`, `sessions.py`, `duo_mode.py`, `background_critic.py`, `code_context.py`, `session_memory.py`, `dev_tools.py`) ohne echtes Mikro/Lautsprecher/API — Gemini-Aufrufe werden durch Fakes ersetzt, die Zwischenablage und Subprozess-Ausführung durch injizierbare Funktionen. `main.py` und `gemini_session.py` (Flet-Oberfläche + echte Audio-/Gemini-/Tool-Calling-Verdrahtung) haben keine automatisierten Tests — per Hand prüfen (`python main.py` starten und ausprobieren). **Function-Calling insbesondere ist noch nicht gegen eine echte Verbindung getestet** — die `tools=`/`FunctionResponse`-Formen wurden nur gegen das installierte SDK auf korrekte Konstruktion geprüft, nie ein echter Roundtrip.
 
 ---
 
@@ -231,6 +237,19 @@ Eine App, mit der du per Sprache mit einer KI über deine Geschäftsideen oder d
 - Ergänzt um **Auto-Save bei Disconnect**: Fenster schließen speichert die Sitzung jetzt automatisch (`shutdown()`), falls noch nicht manuell gespeichert — sonst hätte Cross-Session-Gedächtnis oft gar nichts zum Zusammenfassen.
 - Ergänzt um **sichtbare Injektionen**: beide unsichtbaren `send_text()`-Aufrufe (Kritiker-Hinweis, Sitzungs-Zusammenfassung) hinterlassen jetzt eine kleine, graue Hinweiszeile im Transkript-Fenster — rein lokal, nicht Teil der KI-Konversation, aber sichtbarer Beweis, dass die Hintergrund-Features wirklich laufen.
 - Ergänzt um **Kritiker-Gedächtnis über Sitzungen**: Kritiker-Hinweise landen jetzt mit `who: "Kritiker"` direkt im `transcript_log` und damit automatisch in der gespeicherten Sitzung. `background_critic.extract_last_hint()` findet beim nächsten Connect den letzten offenen Punkt, `send_resume_context()` reicht ihn als `prior_hint` an jeden weiteren Critic-Check dieser Sitzung weiter — der Kritiker prüft dann, ob das, was er letztes Mal bemängelt hat, inzwischen behoben wurde.
+
+</details>
+
+<details>
+<summary><b>Bonus — Function-Calling (feste Kommando-Allowlist)</b> ✅ umgesetzt</summary>
+<br>
+
+- Bis hierhin konnte die KI über Code *reden* (Code-Kontext-Grounding, Kritiker) — aber nichts *tun*. Jetzt kann sie tatsächlich `pytest` laufen lassen oder `git status`/`git diff`/`git log` ansehen und die echte Ausgabe zurückbekommen.
+- **Sicherheit durch Konstruktion**: Das Modell wählt nur einen Namen aus einer festen Liste (`dev_tools.ALLOWED`) über ein Enum in der Function-Declaration — es übergibt nie eigene Argumente oder freien Text. Der tatsächliche Befehl (`argv`) kommt ausschließlich aus dem Code, nie vom Modell. Keine Schreib- oder Löschoperationen in der Allowlist.
+- Läuft über `asyncio.create_subprocess_exec` (nicht `subprocess.run`), damit ein hängender Prozess (z.B. ein Endlos-Test) die Sprach-Sitzung nicht blockiert — ein Timeout killt ihn stattdessen, statt ihn im Hintergrund weiterlaufen zu lassen.
+- Ein Exit-Code ≠ 0 (fehlgeschlagene Tests) ist eine valide, sprechbare Antwort, kein stiller Fehler — anders als beim Kritiker/Code-Kontext wird hier NICHT `None` zurückgegeben.
+- Sichtbar im Transkript: jeder ausgeführte Befehl hinterlässt eine `🔧`-Hinweiszeile mit Kommando + Ergebnis-Vorschau.
+- ⚠️ **Ehrlicher Stand**: `dev_tools.py`s Logik ist per TDD getestet (11 Tests, Fake-Runner statt echter Subprozesse). Die Verdrahtung in `gemini_session.py` (`tools=`, `message.tool_call`, `send_tool_response()`) wurde gegen das installierte SDK auf korrekte Konstruktion geprüft, aber **noch nie gegen eine echte Live-Verbindung getestet** — vor Verlass darauf manuell mit `python main.py` verifizieren.
 
 </details>
 
