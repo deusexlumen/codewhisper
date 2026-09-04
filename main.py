@@ -193,9 +193,13 @@ async def main(page: ft.Page):
                 for mode, label in DUO_MODE_LABELS.items()
             ],
         )
+        critic_switch = ft.Switch(
+            label="Hintergrund-Prüfer (Kritiker)",
+            value=config.critic_enabled,
+        )
         hint = ft.Text(
-            "Wirkt erst beim nächsten Start der App (Stimme + Duo-Mode werden nur "
-            "beim Verbinden gesetzt).",
+            "Wirkt erst beim nächsten Start der App (Stimme, Duo-Mode und "
+            "Hintergrund-Prüfer werden nur beim Verbinden gesetzt).",
             size=11,
             italic=True,
         )
@@ -204,9 +208,14 @@ async def main(page: ft.Page):
             page.pop_dialog()
 
         def save_settings(_e) -> None:
-            AppConfig.save_settings(voice=voice_dropdown.value, duo_mode=duo_dropdown.value)
+            AppConfig.save_settings(
+                voice=voice_dropdown.value,
+                duo_mode=duo_dropdown.value,
+                critic_enabled=critic_switch.value,
+            )
             config.voice = voice_dropdown.value
             config.duo_mode = duo_dropdown.value
+            config.critic_enabled = critic_switch.value
             close_dialog()
             set_status(
                 "Einstellungen gespeichert – wirkt nach Neustart.",
@@ -216,7 +225,9 @@ async def main(page: ft.Page):
         dialog = ft.AlertDialog(
             modal=True,
             title=ft.Text("Einstellungen"),
-            content=ft.Column([voice_dropdown, duo_dropdown, hint], tight=True, spacing=8),
+            content=ft.Column(
+                [voice_dropdown, duo_dropdown, critic_switch, hint], tight=True, spacing=8
+            ),
             actions=[
                 ft.TextButton("Abbrechen", on_click=close_dialog),
                 ft.FilledButton("Speichern", on_click=save_settings),

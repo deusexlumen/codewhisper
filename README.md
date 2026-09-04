@@ -128,7 +128,7 @@ Mic-Thread und Speaker-Thread laufen unabhängig vom Event-Loop (echte Audio-Thr
 | `model` | welches Gemini-Modell (voreingestellt passt) |
 | `system_instruction` | die „Persönlichkeit" der KI |
 | `duo_mode` | `"off"` \| `"auto"` (Rollenwechsel nach jeder Antwort) \| `"manual"` (per Knopf im Fenster) |
-| `critic_enabled` | `true`/`false` — schaltet den Hintergrund-Prüfer an/aus |
+| `critic_enabled` | `true`/`false` — schaltet den Hintergrund-Prüfer an/aus, auch über den Schalter im Zahnrad-Dialog |
 | `critic_model` | welches (nicht-live) Gemini-Textmodell der Prüfer benutzt |
 | `critic_check_every` | nach wie vielen eigenen Gesprächsbeiträgen der Prüfer nachschaut |
 
