@@ -21,11 +21,34 @@ from config import AppConfig
 from gemini_session import GeminiLiveSession
 from sessions import list_sessions, load_session, save_session
 
+# --- Design-Tokens ---
+# Palette bewusst deckungsgleich mit den Akzentfarben im README-Architektur-
+# diagramm (Kritiker=Grün, Session-Memory=Amber, Tools=Rot, Code-Kontext=Blau)
+# -- Farbe kodiert hier durchgehend, WELCHES Feature gerade "spricht", nicht
+# nur Dekoration.
+BG_COLOR = "#0B0F14"
+USER_BUBBLE_COLOR = "#2A2E35"
+KI_BUBBLE_COLOR = "#241F3D"
+ACCENT_KI = "#8E75FF"
+ACCENT_CRITIC = "#2EA44F"
+ACCENT_MEMORY = "#D97706"
+ACCENT_TOOLS = "#DC2626"
+ACCENT_CONTEXT = "#0175C2"
+ACCENT_NEUTRAL = "#6B7280"
+
+# Duo-Mode-Rollenfarben für Sprechblasen -- nur im "manual"-Modus verlässlich
+# einsetzbar (siehe CLAUDE.md: für "auto" gibt es keine verlässliche Info,
+# welche Rolle die KI gerade tatsächlich spielt).
+ROLE_BUBBLE_COLORS = {
+    duo_mode.ROLE_VISIONAER: "#3A2E14",
+    duo_mode.ROLE_PRAGMATIKER: "#123822",
+}
+
 STATUS_COLORS = {
-    "idle": ft.Colors.GREY_500,
-    "connecting": ft.Colors.AMBER_600,
-    "connected": ft.Colors.GREEN_500,
-    "error": ft.Colors.RED_500,
+    "idle": ACCENT_NEUTRAL,
+    "connecting": ACCENT_MEMORY,
+    "connected": ACCENT_CRITIC,
+    "error": ACCENT_TOOLS,
 }
 
 DUO_MODE_LABELS = {
@@ -49,13 +72,18 @@ async def main(page: ft.Page):
     page.window.width = 520
     page.window.height = 720
     page.theme_mode = ft.ThemeMode.DARK
+    page.bgcolor = BG_COLOR
 
     # --- UI-Elemente ---
+    # Signature-Element: der Punkt pulsiert sanft, solange verbunden ist --
+    # visuelle Entsprechung von "hört gerade zu" (siehe _pulse_status_dot()).
+    # Reines Flet-Bordmittel (animate_opacity), keine neue Abhängigkeit.
     status_dot = ft.Container(
         width=14,
         height=14,
         border_radius=7,
         bgcolor=STATUS_COLORS["idle"],
+        animate_opacity=300,
     )
     status_text = ft.Text("Bereit – verbinde gleich …", size=14)
     settings_button = ft.IconButton(icon=ft.Icons.SETTINGS, tooltip="Einstellungen")
@@ -67,21 +95,24 @@ async def main(page: ft.Page):
 
     transcript_view = ft.ListView(expand=True, spacing=6, auto_scroll=True)
 
+    # Mute bleibt der einzige Text-Knopf (primäre, meistgenutzte Aktion).
+    # Die übrigen sind Icon-Knöpfe mit Tooltip -- weniger visuelles Rauschen
+    # als 5 gleich-gewichtete Text-Knöpfe in einer Reihe.
     mute_button = ft.FilledButton(
         "Mikro stummschalten",
         icon=ft.Icons.MIC,
     )
-    save_session_button = ft.OutlinedButton(
-        "Sitzung speichern", icon=ft.Icons.SAVE
+    save_session_button = ft.IconButton(
+        icon=ft.Icons.SAVE, tooltip="Sitzung speichern"
     )
-    open_sessions_button = ft.OutlinedButton(
-        "Sitzungen öffnen", icon=ft.Icons.FOLDER_OPEN
+    open_sessions_button = ft.IconButton(
+        icon=ft.Icons.FOLDER_OPEN, tooltip="Sitzungen öffnen"
     )
-    switch_role_button = ft.OutlinedButton(
-        "Rolle wechseln", icon=ft.Icons.SWAP_HORIZ, visible=False
+    switch_role_button = ft.IconButton(
+        icon=ft.Icons.SWAP_HORIZ, tooltip="Rolle wechseln", visible=False
     )
-    send_context_button = ft.OutlinedButton(
-        "Code-Kontext senden", icon=ft.Icons.CONTENT_PASTE
+    send_context_button = ft.IconButton(
+        icon=ft.Icons.CONTENT_PASTE, tooltip="Code-Kontext senden"
     )
 
     page.add(
@@ -93,6 +124,7 @@ async def main(page: ft.Page):
             ft.Row(
                 [
                     mute_button,
+                    ft.VerticalDivider(width=16),
                     save_session_button,
                     open_sessions_button,
                     switch_role_button,
@@ -111,6 +143,24 @@ async def main(page: ft.Page):
         status_dot.bgcolor = STATUS_COLORS.get(kind, STATUS_COLORS["idle"])
         page.update()
 
+    async def pulse_status_dot() -> None:
+        """Signature-Element: solange verbunden ist, pulsiert der Status-Punkt
+        sanft zwischen voller und gedämpfter Deckkraft -- visuelle Entsprechung
+        von "hört gerade zu". Läuft dauerhaft im Hintergrund, wirkt aber nur,
+        wenn die Farbe gerade "connected" ist; sonst bleibt der Punkt ruhig."""
+        dim = False
+        while True:
+            await asyncio.sleep(0.9)
+            if status_dot.bgcolor != STATUS_COLORS["connected"]:
+                if status_dot.opacity != 1.0:
+                    status_dot.opacity = 1.0
+                    page.update()
+                dim = False
+                continue
+            dim = not dim
+            status_dot.opacity = 0.35 if dim else 1.0
+            page.update()
+
     transcript_log: list[dict] = []
     critic: BackgroundCritic | None = None  # nach dem Config-Laden gesetzt
     prior_critic_hint: str | None = None  # aus send_resume_context() befüllt
@@ -118,14 +168,20 @@ async def main(page: ft.Page):
     def add_transcript_line(who: str, text: str) -> None:
         transcript_log.append({"who": who, "text": text})
         is_user = who == "Du"
+        if is_user:
+            bubble_color = USER_BUBBLE_COLOR
+        elif config.duo_mode == "manual":
+            # Nur im manuellen Duo-Mode ist current_role verlässlich (siehe
+            # CLAUDE.md) -- im "auto"-Modus bleibt die generische KI-Farbe.
+            bubble_color = ROLE_BUBBLE_COLORS.get(current_role, KI_BUBBLE_COLOR)
+        else:
+            bubble_color = KI_BUBBLE_COLOR
         transcript_view.controls.append(
             ft.Row(
                 [
                     ft.Container(
                         content=ft.Text(f"{who}: {text}", size=13),
-                        bgcolor=ft.Colors.BLUE_GREY_800
-                        if is_user
-                        else ft.Colors.TEAL_900,
+                        bgcolor=bubble_color,
                         padding=8,
                         border_radius=8,
                     )
@@ -139,11 +195,13 @@ async def main(page: ft.Page):
         if critic is not None and critic.register_turn(who):
             asyncio.create_task(run_critic_check())
 
-    def add_system_note(text: str) -> None:
+    def add_system_note(text: str, color: str = ACCENT_NEUTRAL) -> None:
         """Rein lokale Hinweis-Zeile im Transkript-Fenster (kein Teil der
         KI-Konversation, landet nicht in transcript_log) – macht die
-        unsichtbaren send_text()-Injektionen (Kritiker, Session-Memory) für
-        den Nutzer sichtbar, ohne sie aus der Sicht der KI unsichtbar zu machen."""
+        unsichtbaren send_text()-Injektionen (Kritiker, Session-Memory,
+        Tool-Aufrufe) für den Nutzer sichtbar. `color` folgt der Quelle
+        (ACCENT_CRITIC/ACCENT_MEMORY/ACCENT_TOOLS), damit auf einen Blick
+        erkennbar ist, welches Feature gerade gesprochen hat."""
         transcript_view.controls.append(
             ft.Row(
                 [
@@ -151,7 +209,7 @@ async def main(page: ft.Page):
                         text,
                         size=11,
                         italic=True,
-                        color=ft.Colors.GREY_500,
+                        color=color,
                     )
                 ],
                 alignment=ft.MainAxisAlignment.CENTER,
@@ -174,7 +232,7 @@ async def main(page: ft.Page):
         if hint:
             await session.send_text(background_critic.wrap_hint(hint))
             transcript_log.append({"who": "Kritiker", "text": hint})
-            add_system_note(f"🕵️ Kritiker-Hinweis gesendet: {hint}")
+            add_system_note(f"🕵️ Kritiker-Hinweis gesendet: {hint}", color=ACCENT_CRITIC)
 
     # --- Einstellungen (Stimme, Duo-Mode) ---
     def open_settings(_event) -> None:
@@ -360,7 +418,7 @@ async def main(page: ft.Page):
         )
         if summary:
             await session.send_text(session_memory.build_resume_message(summary))
-            add_system_note(f"🧵 Letzte Sitzung eingespielt: {summary}")
+            add_system_note(f"🧵 Letzte Sitzung eingespielt: {summary}", color=ACCENT_MEMORY)
 
     def handle_status(s: str) -> None:
         nonlocal resume_sent
@@ -374,7 +432,7 @@ async def main(page: ft.Page):
         KI ausgeführt hat und was dabei rauskam (gleiches Sichtbarkeits-
         Prinzip wie bei Kritiker-Hinweisen/Sitzungs-Zusammenfassungen)."""
         preview = result_text if len(result_text) <= 200 else result_text[:200] + " …"
-        add_system_note(f"🔧 {command}: {preview}")
+        add_system_note(f"🔧 {command}: {preview}", color=ACCENT_TOOLS)
 
     session = GeminiLiveSession(
         config=config,
@@ -393,10 +451,9 @@ async def main(page: ft.Page):
 
     switch_role_button.on_click = do_switch_role
 
-    async def _reset_context_button_label() -> None:
-        """Setzt den Knopf-Text nach kurzer Zeit zurück (siehe do_send_context)."""
+    async def _reset_context_button_icon() -> None:
+        """Setzt das Knopf-Icon nach kurzer Zeit zurück (siehe do_send_context)."""
         await asyncio.sleep(2)
-        send_context_button.text = "Code-Kontext senden"
         send_context_button.icon = ft.Icons.CONTENT_PASTE
         page.update()
 
@@ -416,10 +473,9 @@ async def main(page: ft.Page):
         set_status("Code-Kontext aus Zwischenablage gesendet.", "connected")
         # Direktes Feedback am Knopf selbst, nicht nur in der weit entfernten
         # Status-Zeile ganz oben (leicht zu übersehen).
-        send_context_button.text = "✓ Gesendet"
         send_context_button.icon = ft.Icons.CHECK
         page.update()
-        asyncio.create_task(_reset_context_button_label())
+        asyncio.create_task(_reset_context_button_icon())
 
     send_context_button.on_click = do_send_context
 
@@ -453,6 +509,7 @@ async def main(page: ft.Page):
         return
 
     feeder_task = asyncio.create_task(audio.speaker_feeder())
+    pulse_task = asyncio.create_task(pulse_status_dot())
     try:
         await session.run()
     except asyncio.CancelledError:
@@ -461,6 +518,7 @@ async def main(page: ft.Page):
         set_status(f"Verbindungsfehler: {exc}", "error")
     finally:
         feeder_task.cancel()
+        pulse_task.cancel()
         audio.stop()
 
 
