@@ -10,7 +10,7 @@ Du sprichst — die KI antwortet per Stimme, in Echtzeit, mit zwei Denkrollen un
 [![Gemini Live API](https://img.shields.io/badge/Gemini-Live%20API-8E75FF?style=flat-square&logo=googlegemini&logoColor=white)](https://ai.google.dev/gemini-api/docs/live)
 [![Flet](https://img.shields.io/badge/UI-Flet-0175C2?style=flat-square)](https://flet.dev/)
 [![Status](https://img.shields.io/badge/Status-4%2F4%20Phasen%20fertig-2EA44F?style=flat-square)](#der-plan-in-4-phasen)
-[![Tests](https://img.shields.io/badge/Tests-51%20passing-2EA44F?style=flat-square)](#tests-ausführen)
+[![Tests](https://img.shields.io/badge/Tests-58%20passing-2EA44F?style=flat-square)](#tests-ausführen)
 [![Sprache](https://img.shields.io/badge/Sprache-Deutsch-black?style=flat-square)](#)
 
 </div>
@@ -25,6 +25,7 @@ Du sprichst — die KI antwortet per Stimme, in Echtzeit, mit zwei Denkrollen un
 | 🎭 **Duo-Mode** | Eine KI, zwei Denkrollen: **Visionär** (Chancen, groß denken) ↔ **Pragmatiker** (Realismus, Kosten, Risiken) |
 | 🕵️ **Closed-Loop-Kritiker** | Läuft still im Hintergrund mit, prüft auch gegen echten Code aus der Zwischenablage und flüstert Logikfehler/Widersprüche der KI unauffällig zu |
 | 📋 **Code-Kontext-Grounding** | Ein Klick schickt den Inhalt der Zwischenablage unsichtbar mit — die KI redet über echten Code statt nur über deine Beschreibung davon |
+| 🧵 **Cross-Session-Gedächtnis** | Beim Verbinden wird die letzte Sitzung automatisch zusammengefasst und unsichtbar eingespeist — jedes Gespräch startet nicht mehr bei Null |
 | 💾 **Sitzungen** | Gesprächsverlauf speichern & wieder öffnen, als JSON unter `sessions/` |
 | 🎨 **Frei einstellbar** | ~30 Gemini-Stimmen zur Auswahl, alles per Zahnrad-Symbol im Fenster |
 
@@ -81,9 +82,13 @@ flowchart LR
     Clip["📋 Zwischenablage"] --> Ctx["code_context.py"]
     Ctx -- "send_text()" --> Live
 
+    Sessions[("sessions/*.json")] --> Mem["session_memory.py"]
+    Mem -- "send_text() (einmalig)" --> Live
+
     style Live fill:#8E75FF,color:#fff
     style Critic fill:#2EA44F,color:#fff
     style Ctx fill:#0175C2,color:#fff
+    style Mem fill:#D97706,color:#fff
 ```
 
 Mic-Thread und Speaker-Thread laufen unabhängig vom Event-Loop (echte Audio-Threads, per `asyncio.Queue`/Lock angebunden). Der Hintergrund-Kritiker und das Code-Kontext-Grounding sind reine Seitenkanäle: Beide reden nur über `GeminiLiveSession.send_text()` unsichtbar in die laufende Sitzung hinein — sie fassen den Audio-Pfad nie direkt an.
@@ -103,7 +108,8 @@ Mic-Thread und Speaker-Thread laufen unabhängig vom Event-Loop (echte Audio-Thr
 | `duo_mode.py` | Phase 3: Regeln für die zwei Denkrollen |
 | `background_critic.py` | Phase 4: der stille Kritiker (Closed-Loop) |
 | `code_context.py` | Code-Kontext-Grounding: Zwischenablage → unsichtbare Kontext-Nachricht |
-| `tests/` | 51 Pytest-Tests für die Logik-Module |
+| `session_memory.py` | Cross-Session-Gedächtnis: letzte Sitzung zusammenfassen → beim Connect einmalig einspeisen |
+| `tests/` | 58 Pytest-Tests für die Logik-Module |
 
 ---
 
@@ -211,6 +217,17 @@ Eine App, mit der du per Sprache mit einer KI über deine Geschäftsideen oder d
 - Ein Knopf im Fenster („Code-Kontext senden") liest die Zwischenablage (`code_context.py`) und schickt sie als unsichtbare Kontext-Nachricht in die laufende Sitzung.
 - Lange Ausschnitte werden gekürzt (`max_chars`, Standard 4000 Zeichen), leere/fehlerhafte Zwischenablage wird sauber abgefangen — bricht die Sprach-Sitzung nie.
 - Git-Diff-Variante bewusst nicht gebaut: dieses Repo selbst hatte zum Zeitpunkt der Entscheidung kein `.git` — kein ungetesteter Pfad für einen Fall, der nicht vorlag.
+
+</details>
+
+<details>
+<summary><b>Bonus — Cross-Session-Gedächtnis</b> ✅ umgesetzt</summary>
+<br>
+
+- Bis hierhin fing jedes Gespräch bei Null an — `load_session()` (Phase 2) war reine Anzeige, floss nie zurück in eine neue Live-Sitzung.
+- Beim Verbinden (`main.py`, exakt einmal pro `session.run()`, per `resume_sent`-Flag) wird die zuletzt gespeicherte Sitzung geladen, über einen separaten Text-Aufruf (`session_memory.summarize_session()`, gleicher Aufbau wie der Hintergrund-Prüfer) in 1-2 Sätzen zusammengefasst und unsichtbar per `send_text()` eingespeist.
+- Kostet einen zusätzlichen API-Call pro Verbindungsaufbau, nicht pro Gesprächsbeitrag — bewusst am günstigsten Punkt im Ablauf platziert.
+- Kein `sessions/`-Ordner vorhanden oder leere Zusammenfassung → sauberer No-Op, bricht den Verbindungsaufbau nie.
 
 </details>
 

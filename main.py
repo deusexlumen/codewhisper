@@ -14,6 +14,7 @@ from google import genai
 import background_critic
 import code_context
 import duo_mode
+import session_memory
 from audio_engine import AudioEngine, list_audio_devices
 from background_critic import BackgroundCritic
 from config import AppConfig
@@ -279,11 +280,14 @@ async def main(page: ft.Page):
         role_text.value = f"Aktuelle Rolle: {current_role}"
         page.update()
 
+    # Text-Client für separate, nicht-live Text-Aufrufe (Hintergrund-Prüfer,
+    # Cross-Session-Zusammenfassung) – eine Instanz reicht für beide Zwecke.
+    text_client = genai.Client(api_key=config.api_key)
+
     # Phase 4: Hintergrund-Prüfer (separater, nicht-live Text-Aufruf).
     if config.critic_enabled:
-        critic_client = genai.Client(api_key=config.api_key)
         critic = BackgroundCritic(
-            critic_client, config.critic_model, config.critic_check_every
+            text_client, config.critic_model, config.critic_check_every
         )
 
     # Zur Fehlersuche: alle Ton-Geräte ins Terminal schreiben
@@ -298,12 +302,34 @@ async def main(page: ft.Page):
         input_device=config.input_device,
         output_device=config.output_device,
     )
+    resume_sent = False
+
+    async def send_resume_context() -> None:
+        """Cross-Session-Gedächtnis: fasst die letzte gespeicherte Sitzung kurz
+        zusammen und speist sie unsichtbar in die frische Live-Sitzung ein, damit
+        das Gespräch nicht bei Null anfängt. Läuft nur einmal pro Verbindungsaufbau.
+        Fehler dürfen den Sitzungsstart nie stören (siehe session_memory.summarize_session)."""
+        found = list_sessions()
+        if not found:
+            return
+        records = load_session(found[0])
+        summary = await session_memory.summarize_session(
+            text_client, config.critic_model, records
+        )
+        if summary:
+            await session.send_text(session_memory.build_resume_message(summary))
+
+    def handle_status(s: str) -> None:
+        nonlocal resume_sent
+        set_status(s, "connected" if s.startswith("Verbunden") else "connecting")
+        if s == "Verbunden" and not resume_sent:
+            resume_sent = True
+            asyncio.create_task(send_resume_context())
+
     session = GeminiLiveSession(
         config=config,
         audio=audio,
-        on_status=lambda s: set_status(
-            s, "connected" if s.startswith("Verbunden") else "connecting"
-        ),
+        on_status=handle_status,
         on_transcript=add_transcript_line,
     )
 
