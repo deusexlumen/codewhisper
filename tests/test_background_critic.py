@@ -1,6 +1,12 @@
 import pytest
 
-from background_critic import BackgroundCritic, build_critic_prompt, parse_critic_response, wrap_hint
+from background_critic import (
+    BackgroundCritic,
+    build_critic_prompt,
+    extract_last_hint,
+    parse_critic_response,
+    wrap_hint,
+)
 
 
 # ---------- build_critic_prompt ----------
@@ -45,6 +51,41 @@ def test_build_critic_prompt_includes_code_snippet():
 def test_build_critic_prompt_ignores_empty_code_snippet():
     prompt = build_critic_prompt([{"who": "Du", "text": "Hallo"}], code_snippet="   ")
     assert "Code-Ausschnitt aus der Zwischenablage:" not in prompt
+
+
+def test_build_critic_prompt_includes_prior_hint():
+    prompt = build_critic_prompt(
+        [{"who": "Du", "text": "Weiter geht's."}],
+        prior_hint="Die Zielgruppe widersprach sich.",
+    )
+    assert "Offener Punkt aus letzter Sitzung:" in prompt
+    assert "Die Zielgruppe widersprach sich." in prompt
+
+
+def test_build_critic_prompt_without_prior_hint_omits_section():
+    prompt = build_critic_prompt([{"who": "Du", "text": "Hallo"}])
+    assert "Offener Punkt aus letzter Sitzung:" not in prompt
+
+
+# ---------- extract_last_hint ----------
+
+def test_extract_last_hint_returns_last_kritiker_entry():
+    records = [
+        {"who": "Du", "text": "Reden wir über Preise."},
+        {"who": "Kritiker", "text": "Erster Hinweis."},
+        {"who": "KI", "text": "Verstanden."},
+        {"who": "Kritiker", "text": "Zweiter, neuerer Hinweis."},
+    ]
+    assert extract_last_hint(records) == "Zweiter, neuerer Hinweis."
+
+
+def test_extract_last_hint_returns_none_when_no_kritiker_entries():
+    records = [{"who": "Du", "text": "Hallo"}, {"who": "KI", "text": "Hi"}]
+    assert extract_last_hint(records) is None
+
+
+def test_extract_last_hint_returns_none_for_empty_records():
+    assert extract_last_hint([]) is None
 
 
 # ---------- parse_critic_response ----------
@@ -168,3 +209,15 @@ async def test_check_threads_code_snippet_into_prompt():
     )
     sent_prompt = client.aio.models.calls[0][1]
     assert "def foo():\n    return 1 / 0" in sent_prompt
+
+
+@pytest.mark.asyncio
+async def test_check_threads_prior_hint_into_prompt():
+    client = _FakeClient("OK")
+    critic = BackgroundCritic(client=client, model="gemini-2.5-flash")
+    await critic.check(
+        [{"who": "Du", "text": "Weiter geht's."}],
+        prior_hint="Die Zielgruppe widersprach sich.",
+    )
+    sent_prompt = client.aio.models.calls[0][1]
+    assert "Die Zielgruppe widersprach sich." in sent_prompt

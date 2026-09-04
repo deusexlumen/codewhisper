@@ -113,6 +113,7 @@ async def main(page: ft.Page):
 
     transcript_log: list[dict] = []
     critic: BackgroundCritic | None = None  # nach dem Config-Laden gesetzt
+    prior_critic_hint: str | None = None  # aus send_resume_context() befüllt
 
     def add_transcript_line(who: str, text: str) -> None:
         transcript_log.append({"who": who, "text": text})
@@ -163,11 +164,16 @@ async def main(page: ft.Page):
         Hinweis zu, falls er einen Widerspruch/Logikfehler findet. Netzwerkfehler
         hier dürfen die laufende Sprach-Sitzung nie stören (siehe BackgroundCritic.check).
         Nimmt zusätzlich den aktuellen Zwischenablage-Inhalt mit, damit der Prüfer
-        Behauptungen ("das ist jetzt gefixt") gegen echten Code abgleichen kann."""
+        Behauptungen ("das ist jetzt gefixt") gegen echten Code abgleichen kann, sowie
+        den offenen Punkt aus der letzten Sitzung (falls vorhanden), damit er prüfen
+        kann, ob der inzwischen behoben wurde."""
         code_snippet = code_context.read_clipboard()
-        hint = await critic.check(transcript_log, code_snippet=code_snippet)
+        hint = await critic.check(
+            transcript_log, code_snippet=code_snippet, prior_hint=prior_critic_hint
+        )
         if hint:
             await session.send_text(background_critic.wrap_hint(hint))
+            transcript_log.append({"who": "Kritiker", "text": hint})
             add_system_note(f"🕵️ Kritiker-Hinweis gesendet: {hint}")
 
     # --- Einstellungen (Stimme, Duo-Mode) ---
@@ -329,11 +335,15 @@ async def main(page: ft.Page):
         """Cross-Session-Gedächtnis: fasst die letzte gespeicherte Sitzung kurz
         zusammen und speist sie unsichtbar in die frische Live-Sitzung ein, damit
         das Gespräch nicht bei Null anfängt. Läuft nur einmal pro Verbindungsaufbau.
-        Fehler dürfen den Sitzungsstart nie stören (siehe session_memory.summarize_session)."""
+        Fehler dürfen den Sitzungsstart nie stören (siehe session_memory.summarize_session).
+        Merkt sich zusätzlich den letzten Kritiker-Hinweis aus dieser Sitzung
+        (falls vorhanden) für spätere Critic-Checks in der neuen Sitzung."""
+        nonlocal prior_critic_hint
         found = list_sessions()
         if not found:
             return
         records = load_session(found[0])
+        prior_critic_hint = background_critic.extract_last_hint(records)
         summary = await session_memory.summarize_session(
             text_client, config.critic_model, records
         )

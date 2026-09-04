@@ -10,7 +10,7 @@ Du sprichst — die KI antwortet per Stimme, in Echtzeit, mit zwei Denkrollen un
 [![Gemini Live API](https://img.shields.io/badge/Gemini-Live%20API-8E75FF?style=flat-square&logo=googlegemini&logoColor=white)](https://ai.google.dev/gemini-api/docs/live)
 [![Flet](https://img.shields.io/badge/UI-Flet-0175C2?style=flat-square)](https://flet.dev/)
 [![Status](https://img.shields.io/badge/Status-4%2F4%20Phasen%20fertig-2EA44F?style=flat-square)](#der-plan-in-4-phasen)
-[![Tests](https://img.shields.io/badge/Tests-58%20passing-2EA44F?style=flat-square)](#tests-ausführen)
+[![Tests](https://img.shields.io/badge/Tests-64%20passing-2EA44F?style=flat-square)](#tests-ausführen)
 [![Sprache](https://img.shields.io/badge/Sprache-Deutsch-black?style=flat-square)](#)
 
 </div>
@@ -23,7 +23,7 @@ Du sprichst — die KI antwortet per Stimme, in Echtzeit, mit zwei Denkrollen un
 |---|---|
 | 🗣️ **Live-Sprachgespräch** | Reden statt tippen — Gemini Live API antwortet per Stimme, fast ohne Wartezeit |
 | 🎭 **Duo-Mode** | Eine KI, zwei Denkrollen: **Visionär** (Chancen, groß denken) ↔ **Pragmatiker** (Realismus, Kosten, Risiken) |
-| 🕵️ **Closed-Loop-Kritiker** | Läuft still im Hintergrund mit, prüft auch gegen echten Code aus der Zwischenablage und flüstert Logikfehler/Widersprüche der KI unauffällig zu |
+| 🕵️ **Closed-Loop-Kritiker** | Läuft still im Hintergrund mit, prüft gegen echten Code und offene Punkte aus der letzten Sitzung, und flüstert Logikfehler/Widersprüche der KI unauffällig zu |
 | 📋 **Code-Kontext-Grounding** | Ein Klick schickt den Inhalt der Zwischenablage unsichtbar mit — die KI redet über echten Code statt nur über deine Beschreibung davon |
 | 🧵 **Cross-Session-Gedächtnis** | Beim Verbinden wird die letzte Sitzung automatisch zusammengefasst und unsichtbar eingespeist — jedes Gespräch startet nicht mehr bei Null |
 | 💾 **Sitzungen** | Gesprächsverlauf speichern & wieder öffnen, als JSON unter `sessions/` |
@@ -109,7 +109,7 @@ Mic-Thread und Speaker-Thread laufen unabhängig vom Event-Loop (echte Audio-Thr
 | `background_critic.py` | Phase 4: der stille Kritiker (Closed-Loop) |
 | `code_context.py` | Code-Kontext-Grounding: Zwischenablage → unsichtbare Kontext-Nachricht |
 | `session_memory.py` | Cross-Session-Gedächtnis: letzte Sitzung zusammenfassen → beim Connect einmalig einspeisen |
-| `tests/` | 58 Pytest-Tests für die Logik-Module |
+| `tests/` | 64 Pytest-Tests für die Logik-Module |
 
 ---
 
@@ -230,6 +230,7 @@ Eine App, mit der du per Sprache mit einer KI über deine Geschäftsideen oder d
 - Kein `sessions/`-Ordner vorhanden oder leere Zusammenfassung → sauberer No-Op, bricht den Verbindungsaufbau nie.
 - Ergänzt um **Auto-Save bei Disconnect**: Fenster schließen speichert die Sitzung jetzt automatisch (`shutdown()`), falls noch nicht manuell gespeichert — sonst hätte Cross-Session-Gedächtnis oft gar nichts zum Zusammenfassen.
 - Ergänzt um **sichtbare Injektionen**: beide unsichtbaren `send_text()`-Aufrufe (Kritiker-Hinweis, Sitzungs-Zusammenfassung) hinterlassen jetzt eine kleine, graue Hinweiszeile im Transkript-Fenster — rein lokal, nicht Teil der KI-Konversation, aber sichtbarer Beweis, dass die Hintergrund-Features wirklich laufen.
+- Ergänzt um **Kritiker-Gedächtnis über Sitzungen**: Kritiker-Hinweise landen jetzt mit `who: "Kritiker"` direkt im `transcript_log` und damit automatisch in der gespeicherten Sitzung. `background_critic.extract_last_hint()` findet beim nächsten Connect den letzten offenen Punkt, `send_resume_context()` reicht ihn als `prior_hint` an jeden weiteren Critic-Check dieser Sitzung weiter — der Kritiker prüft dann, ob das, was er letztes Mal bemängelt hat, inzwischen behoben wurde.
 
 </details>
 
