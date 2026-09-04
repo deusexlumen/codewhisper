@@ -228,6 +228,8 @@ Eine App, mit der du per Sprache mit einer KI über deine Geschäftsideen oder d
 - Beim Verbinden (`main.py`, exakt einmal pro `session.run()`, per `resume_sent`-Flag) wird die zuletzt gespeicherte Sitzung geladen, über einen separaten Text-Aufruf (`session_memory.summarize_session()`, gleicher Aufbau wie der Hintergrund-Prüfer) in 1-2 Sätzen zusammengefasst und unsichtbar per `send_text()` eingespeist.
 - Kostet einen zusätzlichen API-Call pro Verbindungsaufbau, nicht pro Gesprächsbeitrag — bewusst am günstigsten Punkt im Ablauf platziert.
 - Kein `sessions/`-Ordner vorhanden oder leere Zusammenfassung → sauberer No-Op, bricht den Verbindungsaufbau nie.
+- Ergänzt um **Auto-Save bei Disconnect**: Fenster schließen speichert die Sitzung jetzt automatisch (`shutdown()`), falls noch nicht manuell gespeichert — sonst hätte Cross-Session-Gedächtnis oft gar nichts zum Zusammenfassen.
+- Ergänzt um **sichtbare Injektionen**: beide unsichtbaren `send_text()`-Aufrufe (Kritiker-Hinweis, Sitzungs-Zusammenfassung) hinterlassen jetzt eine kleine, graue Hinweiszeile im Transkript-Fenster — rein lokal, nicht Teil der KI-Konversation, aber sichtbarer Beweis, dass die Hintergrund-Features wirklich laufen.
 
 </details>
 

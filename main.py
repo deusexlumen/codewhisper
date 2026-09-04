@@ -138,6 +138,26 @@ async def main(page: ft.Page):
         if critic is not None and critic.register_turn(who):
             asyncio.create_task(run_critic_check())
 
+    def add_system_note(text: str) -> None:
+        """Rein lokale Hinweis-Zeile im Transkript-Fenster (kein Teil der
+        KI-Konversation, landet nicht in transcript_log) – macht die
+        unsichtbaren send_text()-Injektionen (Kritiker, Session-Memory) für
+        den Nutzer sichtbar, ohne sie aus der Sicht der KI unsichtbar zu machen."""
+        transcript_view.controls.append(
+            ft.Row(
+                [
+                    ft.Text(
+                        text,
+                        size=11,
+                        italic=True,
+                        color=ft.Colors.GREY_500,
+                    )
+                ],
+                alignment=ft.MainAxisAlignment.CENTER,
+            )
+        )
+        page.update()
+
     async def run_critic_check() -> None:
         """Phase 4: fragt den Hintergrund-Prüfer, flüstert der Live-Sitzung einen
         Hinweis zu, falls er einen Widerspruch/Logikfehler findet. Netzwerkfehler
@@ -148,6 +168,7 @@ async def main(page: ft.Page):
         hint = await critic.check(transcript_log, code_snippet=code_snippet)
         if hint:
             await session.send_text(background_critic.wrap_hint(hint))
+            add_system_note(f"🕵️ Kritiker-Hinweis gesendet: {hint}")
 
     # --- Einstellungen (Stimme, Duo-Mode) ---
     def open_settings(_event) -> None:
@@ -318,6 +339,7 @@ async def main(page: ft.Page):
         )
         if summary:
             await session.send_text(session_memory.build_resume_message(summary))
+            add_system_note(f"🧵 Letzte Sitzung eingespielt: {summary}")
 
     def handle_status(s: str) -> None:
         nonlocal resume_sent
@@ -370,6 +392,8 @@ async def main(page: ft.Page):
     mute_button.on_click = toggle_mute
 
     async def shutdown() -> None:
+        if transcript_log:
+            save_session(transcript_log)
         await session.stop()
         audio.stop()
 
