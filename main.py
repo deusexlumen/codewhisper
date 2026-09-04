@@ -382,6 +382,13 @@ async def main(page: ft.Page):
 
     switch_role_button.on_click = do_switch_role
 
+    async def _reset_context_button_label() -> None:
+        """Setzt den Knopf-Text nach kurzer Zeit zurück (siehe do_send_context)."""
+        await asyncio.sleep(2)
+        send_context_button.text = "Code-Kontext senden"
+        send_context_button.icon = ft.Icons.CONTENT_PASTE
+        page.update()
+
     def do_send_context(_event) -> None:
         """10x-Feature: schickt den aktuellen Zwischenablage-Inhalt (Code-Ausschnitt)
         unsichtbar in die laufende Sitzung, damit die KI real vorliegenden Code
@@ -396,6 +403,12 @@ async def main(page: ft.Page):
             return
         asyncio.create_task(session.send_text(message))
         set_status("Code-Kontext aus Zwischenablage gesendet.", "connected")
+        # Direktes Feedback am Knopf selbst, nicht nur in der weit entfernten
+        # Status-Zeile ganz oben (leicht zu übersehen).
+        send_context_button.text = "✓ Gesendet"
+        send_context_button.icon = ft.Icons.CHECK
+        page.update()
+        asyncio.create_task(_reset_context_button_label())
 
     send_context_button.on_click = do_send_context
 
