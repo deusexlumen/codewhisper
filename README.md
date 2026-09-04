@@ -1,5 +1,7 @@
 <div align="center">
 
+![CodeWhisper Banner](assets/banner.png)
+
 # 🎙️ CodeWhisper
 
 ### Sprachgesteuerter Entwicklungs-Assistent
