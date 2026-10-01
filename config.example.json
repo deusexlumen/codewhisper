@@ -6,5 +6,7 @@
   "duo_mode": "off",
   "critic_enabled": false,
   "critic_model": "gemini-2.5-flash",
-  "critic_check_every": 3
+  "critic_check_every": 3,
+  "discord_token": "",
+  "discord_voice_channel_id": null
 }

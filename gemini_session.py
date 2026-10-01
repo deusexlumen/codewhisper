@@ -5,14 +5,19 @@ Verbindung zur Gemini Live API.
 Antwort-Audio und Textmitschrift kommen runter.
 """
 import asyncio
-from typing import Awaitable, Callable
+from typing import TYPE_CHECKING, Awaitable, Callable
 
 from google import genai
 from google.genai import types
 
 import dev_tools
-from audio_engine import AudioEngine
 from config import AppConfig
+
+if TYPE_CHECKING:
+    # Nur für den Typ-Hinweis: sounddevice/PortAudio soll nicht geladen
+    # werden müssen, wenn die Discord-Bridge statt AudioEngine einen
+    # DiscordAudioAdapter mit derselben Schnittstelle übergibt.
+    from audio_engine import AudioEngine
 
 StatusCallback = Callable[[str], None]
 TranscriptCallback = Callable[[str, str], None]  # (wer, text)
@@ -32,16 +37,20 @@ class GeminiLiveSession:
     def __init__(
         self,
         config: AppConfig,
-        audio: AudioEngine,
+        audio: "AudioEngine",
         on_status: StatusCallback,
         on_transcript: TranscriptCallback | None = None,
         on_tool_call: ToolCallCallback | None = None,
+        enable_tools: bool = True,
     ):
         self.config = config
         self.audio = audio
         self.on_status = on_status
         self.on_transcript = on_transcript
         self.on_tool_call = on_tool_call
+        # Discord-Bridge schaltet das ab: dort könnte jede Person im Kanal
+        # pytest/git auf dem Host-Rechner auslösen.
+        self.enable_tools = enable_tools
         self.session = None  # aktive Verbindung (für spätere Text-Einspeisung)
         self._stop = asyncio.Event()
 
@@ -67,7 +76,11 @@ class GeminiLiveSession:
             output_audio_transcription=types.AudioTranscriptionConfig(),
             # Function-Calling: feste Allowlist (dev_tools.py), keine freien
             # Kommandos -- das Modell wählt nur einen Namen aus einem Enum.
-            tools=[types.Tool(function_declarations=[dev_tools.build_tool_declaration()])],
+            tools=(
+                [types.Tool(function_declarations=[dev_tools.build_tool_declaration()])]
+                if self.enable_tools
+                else None
+            ),
         )
 
         self.on_status("Verbinde …")
@@ -98,10 +111,16 @@ class GeminiLiveSession:
         self.session = None
 
     async def _send_loop(self, session) -> None:
-        """Schickt Mikro-Audio Stück für Stück an Gemini."""
+        """Schickt Mikro-Audio Stück für Stück an Gemini. Ein str in der
+        Warteschlange (Discord-Sprecherwechsel) geht als Echtzeit-Text raus --
+        send_realtime_input(text=) beendet, anders als send_client_content,
+        den laufenden Nutzer-Turn nicht."""
         try:
             while True:
                 chunk = await self.audio.mic_to_gemini.get()
+                if isinstance(chunk, str):
+                    await session.send_realtime_input(text=chunk)
+                    continue
                 await session.send_realtime_input(
                     audio=types.Blob(data=chunk, mime_type="audio/pcm;rate=16000")
                 )

@@ -117,7 +117,9 @@ Mic-Thread und Speaker-Thread laufen unabhängig vom Event-Loop (echte Audio-Thr
 | `code_context.py` | Code-Kontext-Grounding: Zwischenablage → unsichtbare Kontext-Nachricht |
 | `session_memory.py` | Cross-Session-Gedächtnis: letzte Sitzung zusammenfassen → beim Connect einmalig einspeisen |
 | `dev_tools.py` | Function-Calling: feste Kommando-Allowlist (`pytest`, `git status/diff/log`) ausführen |
-| `tests/` | 75 Pytest-Tests für die Logik-Module |
+| `discord_audio.py` | Discord-Bridge: Resampling 48k↔16k/24k, 20-ms-Ringpuffer, Sprecher-Gate, Barge-In (reine Logik) |
+| `discord_bridge.py` | Discord-Bridge: Startpunkt (`python discord_bridge.py`), verdrahtet Discord mit `GeminiLiveSession` |
+| `tests/` | 93 Pytest-Tests für die Logik-Module |
 
 ---
 
@@ -133,6 +135,25 @@ Mic-Thread und Speaker-Thread laufen unabhängig vom Event-Loop (echte Audio-Thr
 | `critic_enabled` | `true`/`false` — schaltet den Hintergrund-Prüfer an/aus, auch über den Schalter im Zahnrad-Dialog |
 | `critic_model` | welches (nicht-live) Gemini-Textmodell der Prüfer benutzt |
 | `critic_check_every` | nach wie vielen eigenen Gesprächsbeiträgen der Prüfer nachschaut |
+| `discord_token` | nur für `discord_bridge.py`: Bot-Token (oder Umgebungsvariable `DISCORD_TOKEN`) |
+| `discord_voice_channel_id` | nur für `discord_bridge.py`: ID des Sprachkanals, dem der Bot beitritt |
+
+---
+
+## 🎧 Discord-Voice-Bridge (experimentell)
+
+`python discord_bridge.py` lässt die KI einem Discord-Sprachkanal beitreten. Wiederverwendet `GeminiLiveSession` 1:1 — statt Mikro/Lautsprecher bekommt sie einen `DiscordAudioAdapter` mit derselben Schnittstelle.
+
+```
+Discord-Nutzer ─► voice_recv (Jitter-Puffer, Opus-Dekodierung) ─► Sprecher-Gate ─► 48k Stereo → 16k Mono ─► Gemini
+Discord-Player ◄─ Ringpuffer (Discord zieht alle 20 ms 3840 Bytes) ◄─ 24k Mono → 48k Stereo ◄───────────────┘
+```
+
+- **Takt:** Kein eigener Timer — Discords Player-Thread *zieht* alle 20 ms genau einen Frame (960 Samples × 2 Kanäle × 2 Bytes = **3840 Bytes**). Leerer Puffer → Stille-Frame. Dadurch keine Takt-Drift.
+- **Mehrere Sprecher:** Wer zuerst redet, behält das Wort, bis er 0,6 s still ist; andere werden solange verworfen. Bei einem Wechsel geht vorher `[Sprecherwechsel: Name]` per `send_realtime_input(text=…)` an Gemini — bewusst *nicht* `send_client_content`, das würde den laufenden Turn beenden.
+- **Barge-In:** Gemini erkennt Unterbrechungen selbst (Server-VAD → `interrupted`). Zusätzlich leert die Bridge lokal sofort den Puffer, wenn jemand laut genug dazwischenredet, und verwirft bis zu 1 s lang weitere KI-Audio-Stücke (oder bis Gemini `interrupted` bestätigt).
+- **Function-Calling ist hier aus** — sonst könnte jede Person im Kanal `pytest`/`git` auf deinem Rechner auslösen.
+- **Nicht gegen echtes Discord getestet.** Nur die Logik in `discord_audio.py` hat Tests. Größtes Risiko: Discords Ende-zu-Ende-Verschlüsselung für Sprache (DAVE) — `discord-ext-voice-recv` 0.5.2a kann empfangene DAVE-verschlüsselte Pakete womöglich nicht entschlüsseln.
 
 ---
 
@@ -142,7 +163,7 @@ Mic-Thread und Speaker-Thread laufen unabhängig vom Event-Loop (echte Audio-Thr
 pytest
 ```
 
-Testet die Logik-Module (`config.py`, `sessions.py`, `duo_mode.py`, `background_critic.py`, `code_context.py`, `session_memory.py`, `dev_tools.py`) ohne echtes Mikro/Lautsprecher/API — Gemini-Aufrufe werden durch Fakes ersetzt, die Zwischenablage und Subprozess-Ausführung durch injizierbare Funktionen. `main.py` und `gemini_session.py` (Flet-Oberfläche + echte Audio-/Gemini-/Tool-Calling-Verdrahtung) haben keine automatisierten Tests — per Hand prüfen (`python main.py` starten und ausprobieren). **Function-Calling insbesondere ist noch nicht gegen eine echte Verbindung getestet** — die `tools=`/`FunctionResponse`-Formen wurden nur gegen das installierte SDK auf korrekte Konstruktion geprüft, nie ein echter Roundtrip.
+Testet die Logik-Module (`config.py`, `sessions.py`, `duo_mode.py`, `background_critic.py`, `code_context.py`, `session_memory.py`, `dev_tools.py`, `discord_audio.py`) ohne echtes Mikro/Lautsprecher/API — Gemini-Aufrufe werden durch Fakes ersetzt, die Zwischenablage und Subprozess-Ausführung durch injizierbare Funktionen. `main.py` und `gemini_session.py` (Flet-Oberfläche + echte Audio-/Gemini-/Tool-Calling-Verdrahtung) haben keine automatisierten Tests — per Hand prüfen (`python main.py` starten und ausprobieren). **Function-Calling insbesondere ist noch nicht gegen eine echte Verbindung getestet** — die `tools=`/`FunctionResponse`-Formen wurden nur gegen das installierte SDK auf korrekte Konstruktion geprüft, nie ein echter Roundtrip.
 
 ---
 
