@@ -129,7 +129,7 @@ Mic-Thread und Speaker-Thread laufen unabhängig vom Event-Loop (echte Audio-Thr
 |---|---|
 | `api_key` | dein Gemini-Key (Pflicht) |
 | `voice` | Stimme der KI (z. B. `Aoede`, `Charon`, `Kore`, `Puck`, `Fenrir`) — auch über das Zahnrad-Symbol änderbar |
-| `model` | welches Gemini-Modell (voreingestellt passt) |
+| `model` | welches Gemini-Live-Modell (voreingestellt: `gemini-3.8-live`; `send_text()` und das asynchrone Function-Calling sind auf dessen Verhalten abgestimmt) |
 | `system_instruction` | die „Persönlichkeit" der KI |
 | `duo_mode` | `"off"` \| `"auto"` (Rollenwechsel nach jeder Antwort) \| `"manual"` (per Knopf im Fenster) |
 | `critic_enabled` | `true`/`false` — schaltet den Hintergrund-Prüfer an/aus, auch über den Schalter im Zahnrad-Dialog |

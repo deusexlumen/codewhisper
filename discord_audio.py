@@ -39,7 +39,9 @@ DISCORD_INSTRUCTION_ADDON = (
     "\n\nDu bist in einem Discord-Sprachkanal mit mehreren Personen. "
     "Vor dem Audio einer Person kommt ein Hinweis der Form "
     "„[Sprecherwechsel: Name]“. Merke dir, wer was gesagt hat, und sprich "
-    "Personen mit Namen an, wenn es hilft. Lies diese Hinweise nie vor."
+    "Personen mit Namen an, wenn es hilft. Lies diese Hinweise nie vor. "
+    "Antworte nur, wenn du direkt angesprochen wirst oder eine Frage an dich "
+    "geht -- Gespräche der anderen untereinander lässt du laufen."
 )
 
 

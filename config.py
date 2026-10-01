@@ -8,7 +8,7 @@ from pathlib import Path
 @dataclass
 class AppConfig:
     api_key: str
-    model: str = "gemini-live-2.5-flash-preview"
+    model: str = "gemini-3.8-live"
     voice: str = "Aoede"
     system_instruction: str = "Du bist ein hilfreicher Assistent. Antworte auf Deutsch, kurz und klar."
     input_device: str | None = None
