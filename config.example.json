@@ -7,6 +7,7 @@
   "critic_enabled": false,
   "critic_model": "gemini-2.5-flash",
   "critic_check_every": 3,
+  "session_resumption": true,
   "discord_token": "",
   "discord_voice_channel_id": null
 }

@@ -19,6 +19,9 @@ class AppConfig:
     critic_enabled: bool = False
     critic_model: str = "gemini-2.5-flash"
     critic_check_every: int = 3
+    # Gesprächskontext über Verbindungsabbrüche retten (Session-Resumption +
+    # Kontext-Kompression). Abschaltbar, falls ein Modell das nicht kann.
+    session_resumption: bool = True
     # Discord-Voice-Bridge (discord_bridge.py) -- nur dort gebraucht
     discord_token: str = ""
     discord_voice_channel_id: int | None = None
@@ -48,6 +51,7 @@ class AppConfig:
             critic_enabled=data.get("critic_enabled", cls.critic_enabled),
             critic_model=data.get("critic_model", cls.critic_model),
             critic_check_every=data.get("critic_check_every", cls.critic_check_every),
+            session_resumption=data.get("session_resumption", cls.session_resumption),
             discord_token=data.get("discord_token") or os.environ.get("DISCORD_TOKEN", ""),
             discord_voice_channel_id=data.get("discord_voice_channel_id") or None,
         )

@@ -117,9 +117,10 @@ Mic-Thread und Speaker-Thread laufen unabhängig vom Event-Loop (echte Audio-Thr
 | `code_context.py` | Code-Kontext-Grounding: Zwischenablage → unsichtbare Kontext-Nachricht |
 | `session_memory.py` | Cross-Session-Gedächtnis: letzte Sitzung zusammenfassen → beim Connect einmalig einspeisen |
 | `dev_tools.py` | Function-Calling: feste Kommando-Allowlist (`pytest`, `git status/diff/log`) ausführen |
+| `reconnect.py` | Wiederverbindungs-Regeln: Backoff mit Jitter, welche Fehler sinnlos zu wiederholen sind |
 | `discord_audio.py` | Discord-Bridge: Resampling 48k↔16k/24k, 20-ms-Ringpuffer, Sprecher-Gate, Barge-In (reine Logik) |
 | `discord_bridge.py` | Discord-Bridge: Startpunkt (`python discord_bridge.py`), verdrahtet Discord mit `GeminiLiveSession` |
-| `tests/` | 93 Pytest-Tests für die Logik-Module |
+| `tests/` | 116 Pytest-Tests für die Logik-Module und den Verbindungs-Lebenszyklus (gegen einen gefälschten Live-Client) |
 
 ---
 
@@ -135,8 +136,19 @@ Mic-Thread und Speaker-Thread laufen unabhängig vom Event-Loop (echte Audio-Thr
 | `critic_enabled` | `true`/`false` — schaltet den Hintergrund-Prüfer an/aus, auch über den Schalter im Zahnrad-Dialog |
 | `critic_model` | welches (nicht-live) Gemini-Textmodell der Prüfer benutzt |
 | `critic_check_every` | nach wie vielen eigenen Gesprächsbeiträgen der Prüfer nachschaut |
+| `session_resumption` | `true`/`false` — Gesprächskontext über Verbindungsabbrüche retten (Session-Resumption + Kontext-Kompression); nur abschalten, falls ein Modell das nicht unterstützt |
 | `discord_token` | nur für `discord_bridge.py`: Bot-Token (oder Umgebungsvariable `DISCORD_TOKEN`) |
 | `discord_voice_channel_id` | nur für `discord_bridge.py`: ID des Sprachkanals, dem der Bot beitritt |
+
+---
+
+## 🛡️ Robustheit
+
+- **Automatischer Neuaufbau:** Bricht die Live-Verbindung ab (Netzwerk, Server kündigt per GoAway das Ende an, Sitzungsdauer erreicht), verbindet sich `GeminiLiveSession` selbst neu — mit wachsender Wartezeit (1 s, 2 s, 4 s … max. 30 s, mit Zufallsanteil), bis zu 8 Fehlversuche in Folge. Eine Verbindung, die eine Minute gehalten hat, setzt den Zähler zurück.
+- **Kontext bleibt erhalten:** Der Server schickt laufend einen Resumption-Handle; damit übernimmt die neue Verbindung das bisherige Gespräch. Ist der Handle abgelaufen, wird frisch (ohne Kontext) verbunden statt aufgegeben. GoAway wird nicht mitten in eine Antwort hinein umgesetzt, sondern sobald die KI fertig gesprochen hat (spätestens kurz vor Fristende).
+- **Sofortige klare Fehler** statt Endlosschleife bei Dingen, die Wiederholen nicht repariert: ungültiger API-Key, unbekanntes Modell, kaputte Konfiguration.
+- **Kein Absturz durch Nebenkanäle:** `send_text()` wirft nie (gibt `False` zurück), Tool-Aufrufe und deren Antworten sind einzeln abgesichert und können vom Server abgebrochen werden.
+- **Discord:** Ein Wächter prüft alle 5 s, ob der Bot noch im Kanal ist, noch zuhört und noch abspielt, und repariert das Fehlende (Kick, Netzwerk-Abbruch, abgestürzter Empfangs-/Abspiel-Thread). Fehler im Audio-Pfad werden in den Discord-Threads abgefangen, statt sie zu beenden. Jede Minute eine Statistik-Zeile im Log („wie viele Frames kommen an?") — hilft z. B. bei Verschlüsselungs-Problemen.
 
 ---
 
@@ -153,7 +165,8 @@ Discord-Player ◄─ Ringpuffer (Discord zieht alle 20 ms 3840 Bytes) ◄─ 24
 - **Mehrere Sprecher:** Wer zuerst redet, behält das Wort, bis er 0,6 s still ist; andere werden solange verworfen. Bei einem Wechsel geht vorher `[Sprecherwechsel: Name]` per `send_realtime_input(text=…)` an Gemini — bewusst *nicht* `send_client_content`, das würde den laufenden Turn beenden.
 - **Barge-In:** Gemini erkennt Unterbrechungen selbst (Server-VAD → `interrupted`). Zusätzlich leert die Bridge lokal sofort den Puffer, wenn jemand laut genug dazwischenredet, und verwirft bis zu 1 s lang weitere KI-Audio-Stücke (oder bis Gemini `interrupted` bestätigt).
 - **Function-Calling ist hier aus** — sonst könnte jede Person im Kanal `pytest`/`git` auf deinem Rechner auslösen.
-- **Nicht gegen echtes Discord getestet.** Nur die Logik in `discord_audio.py` hat Tests. Größtes Risiko: Discords Ende-zu-Ende-Verschlüsselung für Sprache (DAVE) — `discord-ext-voice-recv` 0.5.2a kann empfangene DAVE-verschlüsselte Pakete womöglich nicht entschlüsseln.
+- **Verschlüsselung (DAVE):** Discord erzwingt seit März 2026 Ende-zu-Ende-Verschlüsselung in allen normalen Sprachkanälen (Stage-Kanäle ausgenommen). Das Original-Paket `discord-ext-voice-recv` kann empfangene Pakete dann nicht entschlüsseln — deshalb nutzt `requirements.txt` den Fork von zacker150, auf einen festen Commit gepinnt (bringt einen passenden discord.py-Fork und `davey` mit). Der DAVE-Status steht jede Minute in der Statistik-Zeile im Log.
+- **Nicht gegen echtes Discord getestet.** Nur die Logik in `discord_audio.py` hat Tests; die Bridge importiert sauber gegen den Fork, mehr nicht.
 
 ---
 
