@@ -4,6 +4,10 @@ numpy>=1.26.0
 flet>=0.24.0
 pyperclip>=1.9.0
 
+# Nur für die Discord-Voice-Bridge (discord_bridge.py):
+discord.py[voice]>=2.6.0
+discord-ext-voice-recv>=0.5.2a
+
 # Nur für Tests (siehe tests/):
 pytest>=8.0.0
 pytest-asyncio>=0.24.0

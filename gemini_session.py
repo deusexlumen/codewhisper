@@ -5,14 +5,19 @@ Verbindung zur Gemini Live API.
 Antwort-Audio und Textmitschrift kommen runter.
 """
 import asyncio
-from typing import Awaitable, Callable
+from typing import TYPE_CHECKING, Awaitable, Callable
 
 from google import genai
 from google.genai import types
 
 import dev_tools
-from audio_engine import AudioEngine
 from config import AppConfig
+
+if TYPE_CHECKING:
+    # Nur für den Typ-Hinweis: sounddevice/PortAudio soll nicht geladen
+    # werden müssen, wenn die Discord-Bridge statt AudioEngine einen
+    # DiscordAudioAdapter mit derselben Schnittstelle übergibt.
+    from audio_engine import AudioEngine
 
 StatusCallback = Callable[[str], None]
 TranscriptCallback = Callable[[str, str], None]  # (wer, text)
@@ -32,17 +37,22 @@ class GeminiLiveSession:
     def __init__(
         self,
         config: AppConfig,
-        audio: AudioEngine,
+        audio: "AudioEngine",
         on_status: StatusCallback,
         on_transcript: TranscriptCallback | None = None,
         on_tool_call: ToolCallCallback | None = None,
+        enable_tools: bool = True,
     ):
         self.config = config
         self.audio = audio
         self.on_status = on_status
         self.on_transcript = on_transcript
         self.on_tool_call = on_tool_call
+        # Discord-Bridge schaltet das ab: dort könnte jede Person im Kanal
+        # pytest/git auf dem Host-Rechner auslösen.
+        self.enable_tools = enable_tools
         self.session = None  # aktive Verbindung (für spätere Text-Einspeisung)
+        self._tool_tasks: set[asyncio.Task] = set()  # laufende Tool-Aufrufe
         self._stop = asyncio.Event()
 
     async def stop(self) -> None:
@@ -67,7 +77,11 @@ class GeminiLiveSession:
             output_audio_transcription=types.AudioTranscriptionConfig(),
             # Function-Calling: feste Allowlist (dev_tools.py), keine freien
             # Kommandos -- das Modell wählt nur einen Namen aus einem Enum.
-            tools=[types.Tool(function_declarations=[dev_tools.build_tool_declaration()])],
+            tools=(
+                [types.Tool(function_declarations=[dev_tools.build_tool_declaration()])]
+                if self.enable_tools
+                else None
+            ),
         )
 
         self.on_status("Verbinde …")
@@ -84,10 +98,10 @@ class GeminiLiveSession:
             done, pending = await asyncio.wait(
                 tasks, return_when=asyncio.FIRST_COMPLETED
             )
-            for task in pending:
+            for task in pending | self._tool_tasks:
                 task.cancel()
             # Cancelled Tasks sauber abholen, sonst „exception was never retrieved"
-            await asyncio.gather(*pending, return_exceptions=True)
+            await asyncio.gather(*pending, *self._tool_tasks, return_exceptions=True)
             # Echte Fehler nach oben geben, normale Verbindungs-Enden ignorieren
             for task in done:
                 if task.cancelled():
@@ -98,10 +112,16 @@ class GeminiLiveSession:
         self.session = None
 
     async def _send_loop(self, session) -> None:
-        """Schickt Mikro-Audio Stück für Stück an Gemini."""
+        """Schickt Mikro-Audio Stück für Stück an Gemini. Ein str in der
+        Warteschlange (Discord-Sprecherwechsel) geht als Echtzeit-Text raus --
+        send_realtime_input(text=) beendet, anders als send_client_content,
+        den laufenden Nutzer-Turn nicht."""
         try:
             while True:
                 chunk = await self.audio.mic_to_gemini.get()
+                if isinstance(chunk, str):
+                    await session.send_realtime_input(text=chunk)
+                    continue
                 await session.send_realtime_input(
                     audio=types.Blob(data=chunk, mime_type="audio/pcm;rate=16000")
                 )
@@ -114,7 +134,15 @@ class GeminiLiveSession:
         try:
             async for message in session.receive():
                 if message.tool_call:
-                    await self._handle_tool_call(session, message.tool_call)
+                    # Nicht abwarten: gemini-3.8-live ruft Tools asynchron
+                    # (NON_BLOCKING) und spricht währenddessen weiter. Ein
+                    # await hier würde den Empfang -- und damit dessen Audio --
+                    # bis zu 30 s (dev_tools-Timeout) anhalten.
+                    task = asyncio.create_task(
+                        self._handle_tool_call(session, message.tool_call)
+                    )
+                    self._tool_tasks.add(task)
+                    task.add_done_callback(self._tool_tasks.discard)
                 self._handle_message(message)
         except Exception as exc:
             if not _is_normal_close(exc):
@@ -136,7 +164,12 @@ class GeminiLiveSession:
                 result_text = f"Kommando konnte nicht ausgeführt werden: {exc}"
             responses.append(
                 types.FunctionResponse(
-                    id=call.id, name=call.name, response={"output": result_text}
+                    id=call.id,
+                    name=call.name,
+                    response={"output": result_text},
+                    # Ergebnis erst einbringen, wenn die KI ihren Satz zu Ende
+                    # gesprochen hat, statt sie mittendrin abzuschneiden.
+                    scheduling=types.FunctionResponseScheduling.WHEN_IDLE,
                 )
             )
             if self.on_tool_call:
@@ -169,12 +202,18 @@ class GeminiLiveSession:
             if self.on_transcript:
                 self.on_transcript("KI", content.output_transcription.text)
 
-    async def send_text(self, text: str) -> None:
-        """Schiebt eine unsichtbare Textnachricht in die laufende Sitzung.
-        (Brauchen wir in Phase 4 für den Hintergrund-Prüfer.)"""
+    async def send_text(self, text: str, interrupt: bool = False) -> None:
+        """Schiebt eine unsichtbare Textnachricht in die laufende Sitzung
+        (Kritiker-Hinweis, Rollenwechsel, Code-Kontext, Sitzungs-Zusammenfassung).
+
+        Bei gemini-3.8-live bricht turn_complete=True eine laufende Antwort
+        *immer* ab. Ohne turn_complete wartet der Server dagegen auf die
+        nächste Nachricht (z. B. das nächste Gesagte) und berücksichtigt den
+        Hinweis dann -- genau das „beiläufig einbringen", das alle bisherigen
+        Hinweistexte verlangen. Deshalb standardmäßig nicht unterbrechen."""
         if self.session is None:
             return
         await self.session.send_client_content(
             turns=types.Content(role="user", parts=[types.Part(text=text)]),
-            turn_complete=True,
+            turn_complete=interrupt,
         )
