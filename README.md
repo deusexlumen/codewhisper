@@ -117,9 +117,10 @@ Mic-Thread und Speaker-Thread laufen unabhängig vom Event-Loop (echte Audio-Thr
 | `code_context.py` | Code-Kontext-Grounding: Zwischenablage → unsichtbare Kontext-Nachricht |
 | `session_memory.py` | Cross-Session-Gedächtnis: letzte Sitzung zusammenfassen → beim Connect einmalig einspeisen |
 | `dev_tools.py` | Function-Calling: feste Kommando-Allowlist (`pytest`, `git status/diff/log`) ausführen |
+| `reconnect.py` | Wiederverbindungs-Regeln: Backoff mit Jitter, welche Fehler sinnlos zu wiederholen sind |
 | `discord_audio.py` | Discord-Bridge: Resampling 48k↔16k/24k, 20-ms-Ringpuffer, Sprecher-Gate, Barge-In (reine Logik) |
 | `discord_bridge.py` | Discord-Bridge: Startpunkt (`python discord_bridge.py`), verdrahtet Discord mit `GeminiLiveSession` |
-| `tests/` | 93 Pytest-Tests für die Logik-Module |
+| `tests/` | 116 Pytest-Tests für die Logik-Module und den Verbindungs-Lebenszyklus (gegen einen gefälschten Live-Client) |
 
 ---
 
@@ -135,8 +136,19 @@ Mic-Thread und Speaker-Thread laufen unabhängig vom Event-Loop (echte Audio-Thr
 | `critic_enabled` | `true`/`false` — schaltet den Hintergrund-Prüfer an/aus, auch über den Schalter im Zahnrad-Dialog |
 | `critic_model` | welches (nicht-live) Gemini-Textmodell der Prüfer benutzt |
 | `critic_check_every` | nach wie vielen eigenen Gesprächsbeiträgen der Prüfer nachschaut |
+| `session_resumption` | `true`/`false` — Gesprächskontext über Verbindungsabbrüche retten (Session-Resumption + Kontext-Kompression); nur abschalten, falls ein Modell das nicht unterstützt |
 | `discord_token` | nur für `discord_bridge.py`: Bot-Token (oder Umgebungsvariable `DISCORD_TOKEN`) |
 | `discord_voice_channel_id` | nur für `discord_bridge.py`: ID des Sprachkanals, dem der Bot beitritt |
+
+---
+
+## 🛡️ Robustheit
+
+- **Automatischer Neuaufbau:** Bricht die Live-Verbindung ab (Netzwerk, Server kündigt per GoAway das Ende an, Sitzungsdauer erreicht), verbindet sich `GeminiLiveSession` selbst neu — mit wachsender Wartezeit (1 s, 2 s, 4 s … max. 30 s, mit Zufallsanteil), bis zu 8 Fehlversuche in Folge. Eine Verbindung, die eine Minute gehalten hat, setzt den Zähler zurück.
+- **Kontext bleibt erhalten:** Der Server schickt laufend einen Resumption-Handle; damit übernimmt die neue Verbindung das bisherige Gespräch. Ist der Handle abgelaufen, wird frisch (ohne Kontext) verbunden statt aufgegeben. GoAway wird nicht mitten in eine Antwort hinein umgesetzt, sondern sobald die KI fertig gesprochen hat (spätestens kurz vor Fristende).
+- **Sofortige klare Fehler** statt Endlosschleife bei Dingen, die Wiederholen nicht repariert: ungültiger API-Key, unbekanntes Modell, kaputte Konfiguration.
+- **Kein Absturz durch Nebenkanäle:** `send_text()` wirft nie (gibt `False` zurück), Tool-Aufrufe und deren Antworten sind einzeln abgesichert und können vom Server abgebrochen werden.
+- **Discord:** Ein Wächter prüft alle 5 s, ob der Bot noch im Kanal ist, noch zuhört und noch abspielt, und repariert das Fehlende (Kick, Netzwerk-Abbruch, abgestürzter Empfangs-/Abspiel-Thread). Fehler im Audio-Pfad werden in den Discord-Threads abgefangen, statt sie zu beenden. Jede Minute eine Statistik-Zeile im Log („wie viele Frames kommen an?") — hilft z. B. bei Verschlüsselungs-Problemen.
 
 ---
 

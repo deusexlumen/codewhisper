@@ -17,12 +17,15 @@ DiscordAudioAdapter hat dieselbe Schnittstelle wie AudioEngine
 GeminiLiveSession unverändert für Discord wiederverwendet werden kann.
 """
 import asyncio
+import logging
 import threading
 import time
 from collections import deque
 from typing import Callable
 
 import numpy as np
+
+log = logging.getLogger(__name__)
 
 DISCORD_RATE = 48000
 DISCORD_CHANNELS = 2
@@ -241,6 +244,10 @@ class SpeakerGate:
         self._last_seen = 0.0
         self._last_announced: int | None = None
 
+    def forget_announcement(self) -> None:
+        """Nächster akzeptierter Sprecher gilt wieder als Wechsel."""
+        self._last_announced = None
+
     def accept(self, user_id: int) -> tuple[bool, bool]:
         """-> (Audio durchlassen?, Sprecher hat gewechselt?)"""
         now = self._clock()
@@ -285,14 +292,20 @@ class DiscordAudioAdapter:
         self.resampler = GeminiToDiscordResampler()
         # 0 oder weniger schaltet lokales Barge-In ab (dann nur Geminis VAD)
         self.barge_in_threshold = barge_in_threshold
+        # Zähler für die Diagnose (z. B. „kommt überhaupt Audio an?" bei
+        # Problemen mit Discords Sprach-Verschlüsselung)
+        self.frames_in = 0
+        self.frames_dropped = 0
 
     # --- Eingang: aus dem Discord-Empfangs-Thread ---
 
     def feed_user_pcm(self, user_id: int, name: str, pcm48_stereo: bytes) -> None:
         """Ein 20-ms-Frame eines Discord-Nutzers. Läuft im Empfangs-Thread,
         nicht im Event-Loop -- Übergabe deshalb per call_soon_threadsafe."""
+        self.frames_in += 1
         accepted, changed = self.gate.accept(user_id)
         if not accepted:
+            self.frames_dropped += 1
             return
         if (
             self.barge_in_threshold > 0
@@ -301,12 +314,24 @@ class DiscordAudioAdapter:
         ):
             # Lokal sofort still werden (< 20 ms), statt auf Geminis
             # „interrupted" (Netzwerk-Rundreise + Server-VAD) zu warten.
+            # (Resampler wird hier bewusst nicht angefasst: der gehört dem
+            # Event-Loop; release() setzt ihn dort zurück.)
             self.buffer.barge_in()
-            self.resampler.reset()
         pcm16 = discord_to_gemini(pcm48_stereo)
         if changed:
-            self.loop.call_soon_threadsafe(self._put_nowait, build_speaker_note(name))
-        self.loop.call_soon_threadsafe(self._put_nowait, pcm16)
+            self._post(build_speaker_note(name))
+        self._post(pcm16)
+
+    def _post(self, item: bytes | str) -> None:
+        """Aus dem Empfangs-Thread in den Event-Loop. Beim Herunterfahren
+        kann der Loop schon zu sein -- dann still verwerfen statt den
+        Empfangs-Thread mit einer Exception abzuschießen."""
+        if self.loop.is_closed():
+            return
+        try:
+            self.loop.call_soon_threadsafe(self._put_nowait, item)
+        except RuntimeError:
+            pass
 
     def _put_nowait(self, item: bytes | str) -> None:
         if self.mic_to_gemini.full():
@@ -316,16 +341,36 @@ class DiscordAudioAdapter:
                 pass
         self.mic_to_gemini.put_nowait(item)
 
+    def clear_mic_queue(self) -> None:
+        """Vor jedem (Neu-)Verbinden: in der Pause aufgelaufenes Audio ist
+        veraltet. Außerdem den nächsten Sprecher wieder ansagen -- eine
+        frische Verbindung ohne Resumption kennt die Namen nicht mehr."""
+        while True:
+            try:
+                self.mic_to_gemini.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+        self.gate.forget_announcement()
+
     # --- Ausgang: Gemini -> Ringpuffer -> Discord ---
 
     async def speaker_feeder(self) -> None:
         while True:
             chunk = await self.gemini_to_speaker.get()
-            self.buffer.write(self.resampler.process(chunk))
+            try:
+                self.buffer.write(self.resampler.process(chunk))
+            except Exception:
+                # Ein kaputtes Stück darf die Wiedergabe nicht dauerhaft beenden
+                log.exception("Audio-Stück von Gemini nicht verarbeitbar")
 
     def read_frame(self) -> bytes:
-        """Wird vom Discord-Player-Thread alle 20 ms gerufen."""
-        return self.buffer.read_frame()
+        """Wird vom Discord-Player-Thread alle 20 ms gerufen. Wirft nie:
+        eine Exception hier würde Discords Player beenden."""
+        try:
+            return self.buffer.read_frame()
+        except Exception:
+            log.exception("Ringpuffer-Lesefehler")
+            return SILENCE_FRAME
 
     def clear_playback(self) -> None:
         # Auch schon geholte, noch nicht verarbeitete Gemini-Stücke verwerfen

@@ -178,3 +178,57 @@ async def test_adapter_clear_playback_drops_pending_and_reopens():
     adapter.clear_playback()
     assert adapter.gemini_to_speaker.empty()
     assert not adapter.buffer.is_discarding()
+
+
+@pytest.mark.asyncio
+async def test_adapter_clear_mic_queue_drains_and_reannounces():
+    adapter = DiscordAudioAdapter(asyncio.get_running_loop(), clock=FakeClock())
+    adapter.feed_user_pcm(1, "Anna", _stereo_frame(10))
+    await asyncio.sleep(0)
+    adapter.clear_mic_queue()
+    assert adapter.mic_to_gemini.empty()
+    adapter.feed_user_pcm(1, "Anna", _stereo_frame(10))
+    items = await _drain(adapter.mic_to_gemini)
+    assert items[0] == "[Sprecherwechsel: Anna]"  # nach Neuverbindung erneut angesagt
+
+
+def test_adapter_survives_closed_loop():
+    loop = asyncio.new_event_loop()
+    adapter = DiscordAudioAdapter(loop, clock=FakeClock())
+    loop.close()
+    adapter.feed_user_pcm(1, "Anna", _stereo_frame(10))  # darf nicht werfen
+
+
+def test_adapter_read_frame_never_raises():
+    loop = asyncio.new_event_loop()
+    adapter = DiscordAudioAdapter(loop)
+
+    class Broken:
+        def read_frame(self):
+            raise RuntimeError("kaputt")
+
+    adapter.buffer = Broken()
+    assert adapter.read_frame() == SILENCE_FRAME
+    loop.close()
+
+
+@pytest.mark.asyncio
+async def test_speaker_feeder_survives_bad_chunk():
+    adapter = DiscordAudioAdapter(asyncio.get_running_loop())
+    original = adapter.resampler.process
+    calls = []
+
+    def flaky(chunk):
+        calls.append(chunk)
+        if len(calls) == 1:
+            raise ValueError("kaputtes Stück")
+        return original(chunk)
+
+    adapter.resampler.process = flaky
+    task = asyncio.create_task(adapter.speaker_feeder())
+    adapter.gemini_to_speaker.put_nowait(b"\x01\x00")
+    adapter.gemini_to_speaker.put_nowait(b"\x01\x00" * 10)
+    for _ in range(5):
+        await asyncio.sleep(0)
+    task.cancel()
+    assert adapter.buffer.buffered_bytes == 80  # zweites Stück kam trotzdem an
