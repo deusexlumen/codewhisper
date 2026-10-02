@@ -165,7 +165,8 @@ Discord-Player ◄─ Ringpuffer (Discord zieht alle 20 ms 3840 Bytes) ◄─ 24
 - **Mehrere Sprecher:** Wer zuerst redet, behält das Wort, bis er 0,6 s still ist; andere werden solange verworfen. Bei einem Wechsel geht vorher `[Sprecherwechsel: Name]` per `send_realtime_input(text=…)` an Gemini — bewusst *nicht* `send_client_content`, das würde den laufenden Turn beenden.
 - **Barge-In:** Gemini erkennt Unterbrechungen selbst (Server-VAD → `interrupted`). Zusätzlich leert die Bridge lokal sofort den Puffer, wenn jemand laut genug dazwischenredet, und verwirft bis zu 1 s lang weitere KI-Audio-Stücke (oder bis Gemini `interrupted` bestätigt).
 - **Function-Calling ist hier aus** — sonst könnte jede Person im Kanal `pytest`/`git` auf deinem Rechner auslösen.
-- **Nicht gegen echtes Discord getestet.** Nur die Logik in `discord_audio.py` hat Tests. Größtes Risiko: Discords Ende-zu-Ende-Verschlüsselung für Sprache (DAVE) — `discord-ext-voice-recv` 0.5.2a kann empfangene DAVE-verschlüsselte Pakete womöglich nicht entschlüsseln.
+- **Verschlüsselung (DAVE):** Discord erzwingt seit März 2026 Ende-zu-Ende-Verschlüsselung in allen normalen Sprachkanälen (Stage-Kanäle ausgenommen). Das Original-Paket `discord-ext-voice-recv` kann empfangene Pakete dann nicht entschlüsseln — deshalb nutzt `requirements.txt` den Fork von zacker150, auf einen festen Commit gepinnt (bringt einen passenden discord.py-Fork und `davey` mit). Der DAVE-Status steht jede Minute in der Statistik-Zeile im Log.
+- **Nicht gegen echtes Discord getestet.** Nur die Logik in `discord_audio.py` hat Tests; die Bridge importiert sauber gegen den Fork, mehr nicht.
 
 ---
 

@@ -12,7 +12,9 @@ hier ist nur die Discord-Verdrahtung.
 
 Hinweis: discord.py kann selbst kein Audio *empfangen*, dafür ist
 discord-ext-voice-recv nötig (bringt auch den Jitter-Puffer für die
-eingehenden RTP-Pakete mit, pro SSRC).
+eingehenden RTP-Pakete mit, pro SSRC) -- und zwar der Fork von zacker150,
+weil nur der empfangene DAVE-verschlüsselte Pakete entschlüsseln kann
+(siehe requirements.txt).
 
 Robustheit: Gemini-Seite verbindet sich selbst neu (GeminiLiveSession).
 Für die Discord-Seite prüft ein Wächter alle paar Sekunden, ob der Bot
@@ -183,8 +185,9 @@ class BridgeClient(discord.Client):
                 a = self.adapter
                 log.info(
                     "Statistik: %d Discord-Frames empfangen (%d verworfen, Sprecher-Gate), "
-                    "%.1f s KI-Audio gepuffert",
+                    "%.1f s KI-Audio gepuffert, DAVE: %s",
                     a.frames_in, a.frames_dropped, a.buffer.buffered_bytes / (48000 * 4),
+                    _dave_status(self.vc),
                 )
             await asyncio.sleep(WATCHDOG_INTERVAL)
 
@@ -227,6 +230,17 @@ class BridgeClient(discord.Client):
             await asyncio.wait_for(vc.disconnect(force=True), timeout=5.0)
         except Exception as exc:
             log.debug("Trennen vom Sprachkanal: %s", exc)
+
+
+def _dave_status(vc) -> str:
+    """Status der Discord-Ende-zu-Ende-Verschlüsselung (DAVE) aus der
+    Diagnose des voice_recv-Forks. Bleiben die empfangenen Frames bei 0,
+    obwohl jemand spricht, steht hier meist der Grund."""
+    try:
+        dave = vc.get_recv_diagnostics().get("dave_session") or {}
+        return str(dave.get("status", "unbekannt"))
+    except Exception:
+        return "unbekannt"
 
 
 def _log_after(what: str):

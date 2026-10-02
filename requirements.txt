@@ -5,8 +5,13 @@ flet>=0.24.0
 pyperclip>=1.9.0
 
 # Nur für die Discord-Voice-Bridge (discord_bridge.py):
-discord.py[voice]>=2.6.0
-discord-ext-voice-recv>=0.5.2a
+# Fork mit DAVE-Unterstützung beim *Empfangen* (Discord erzwingt seit März
+# 2026 Ende-zu-Ende-Verschlüsselung in normalen Sprachkanälen; das
+# Original-Paket kann empfangene Pakete dann nicht mehr entschlüsseln).
+# Auf festen Commit gepinnt. Zieht automatisch den passenden discord.py-Fork
+# (zacker150/discord.py) und davey mit -- discord.py deshalb NICHT
+# zusätzlich aus PyPI installieren.
+discord-ext-voice-recv @ git+https://github.com/zacker150/discord-ext-voice-recv@dcf543a1618d6212f10db5d5dbb7a45f76a955e9
 
 # Nur für Tests (siehe tests/):
 pytest>=8.0.0
